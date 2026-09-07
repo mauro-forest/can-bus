@@ -359,6 +359,39 @@ def describe(serial) -> str:
     lines.append(f"  faults reported  {', '.join(sorted(faults)) if faults else 'none'}")
     return "\n".join(lines)
 
+# Commands sent *to* the module, e.g. `AT+GTECC=*,,18,,,,,,,,A73A$`. These are
+# not @Track reports -- they do not start with `+`, so parse() returns None for
+# them -- but they carry the argument the matching +ACK does not echo back.
+SENT_COMMAND_RE = re.compile(r"^AT\+(?P<report>GT[A-Z0-9]{3})=(?P<body>.*)$")
+
+
+def sent_commands(serial) -> dict[str, tuple[str, str | None]]:
+    """Map each sent command's serial number to (report, first argument).
+
+    The module answers `AT+GTECC=*,,18,,,,,,,,A73A$` with
+    `+ACK:GTECC,...,A73A,20260907170657,A73A$`. The `18` -- the part that says
+    what was actually asked for -- appears only in the outgoing line, and the
+    only thing tying the two together is the trailing serial number. So to
+    label a GTECC mark usefully we have to pair them up.
+    """
+    found: dict[str, tuple[str, str | None]] = {}
+    if serial is None or len(serial) == 0:
+        return found
+    for _, line in serial.iterrows():
+        match = SENT_COMMAND_RE.match(str(line.get("text", "")).strip().rstrip("$"))
+        if match is None:
+            continue
+        fields = match.group("body").split(",")
+        # Last field is the serial number; field 0 is the password. Anything
+        # non-empty in between is the argument, and in every command seen so
+        # far there is exactly one.
+        serial_number = fields[-1].strip() if len(fields) > 1 else ""
+        argument = next((f.strip() for f in fields[1:-1] if f.strip()), None)
+        if serial_number:
+            found[serial_number] = (match.group("report"), argument)
+    return found
+
+
 def as_marks(serial):
     """Remote commands as a marks table, usable anywhere marks are.
 
@@ -366,6 +399,15 @@ def as_marks(serial):
     RLONEN, RLOFF, UNLOCK, LOCK, MEULK -- with a timestamp on the same clock as
     the CAN log. That is exactly what a hand-typed mark is, except the operator
     did not have to type it and the timing is the device's own.
+
+    `+ACK:GTECC` is the same kind of event but does not name itself: field 5 is
+    the serial number, not a command, so the label comes from pairing the ack
+    with the `AT+GTECC=` line that provoked it. A GTECC mark is labelled
+    `GTECC:<argument>` -- `GTECC:18` -- because the argument is the whole point
+    of the command and two GTECCs with different arguments are different
+    stimuli. Where no sent line was recorded the label falls back to `GTECC`.
+
+    What the argument *means* is not known. Do not read it as a speed.
 
     The output has the same `timestamp` and `label` columns that
     bikecan.experiment expects, so:
@@ -378,13 +420,22 @@ def as_marks(serial):
     """
     import pandas as pd
 
+    sent = sent_commands(serial)
+
     rows = []
     for _, line in serial.iterrows():
         report = parse(str(line.get("text", "")))
-        if report is None or report.report != "GTRTO":
+        if report is None or report.report not in ("GTRTO", "GTECC"):
             continue
-        # Field 5 of GTRTO is the command being acknowledged.
-        command = report.get("f5") or report.get("f4") or "GTRTO"
+        if report.report == "GTRTO":
+            # Field 5 of GTRTO is the command being acknowledged.
+            command = report.get("f5") or report.get("f4") or "GTRTO"
+        else:
+            # Field 5 of GTECC is the serial number, which is the only handle
+            # on the argument. Field 7 repeats it if field 5 is missing.
+            serial_number = str(report.get("f5") or report.get("f7") or "").strip()
+            _, argument = sent.get(serial_number, (None, None))
+            command = f"GTECC:{argument}" if argument else "GTECC"
         rows.append({"timestamp": line.get("timestamp"), "label": str(command)})
 
     frame = pd.DataFrame(rows, columns=["timestamp", "label"])

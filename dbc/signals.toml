@@ -63,18 +63,34 @@ report still showed head_light_status=1 after HLOFF. Cross-checks against
 """
 
 [[message.signal]]
-name = "HeadLightSource"
+name = "BusAwake"
 start_bit = 0
 length = 8
 byte_order = "big_endian"
 signed = false
 scale = 1
 offset = 0
-confidence = "hypothesis"
+confidence = "confirmed"
 evidence = """
-Byte 0 is 0x02 when the change came from an explicit HLON/HLOFF command and
-0x01 when it came from the unlock sequence, so it may say what asked for the
-change. Two observations of each: nowhere near enough.
+Byte 0. 1 = the bike is awake, 2 = asleep. Bytes 3 and 5 carry the same fact
+inverted: b0=1 goes with b3=b5=1, and b0=2 with b3=b5=0, in every one of the
+311 frames of the three 7 September sessions. Bytes 0, 3 and 5 are one signal.
+
+CORRECTION. This byte was previously recorded as "HeadLightSource", on the
+reading that 0x02 meant the change came from an explicit HLON/HLOFF command
+and 0x01 from the unlock sequence. That was wrong, and the 4 September corpus
+disproves it on its own: that recording contains no UNLOCK at all, yet byte 0
+is 2 in all 103 frames while byte 1 still toggles the headlight on and off.
+Byte 0 says nothing about who asked.
+
+What it does track is the lock. Against the HubLock's own state on 13B76400 it
+agrees in 60/61, 116/120 and 115/120 frames across the three sessions, the
+disagreements all being frames inside a transition. It is 2 throughout the
+4 September corpus, which is a bike that was never unlocked.
+
+WHY IT MATTERS BEYOND THIS MESSAGE. Unlocking the bike wakes the bus: 5
+identifiers become 94. This byte is that state, published at a lamp's address,
+which is why the headlight appeared to switch on by itself after UNLOCK.
 """
 
 [[message]]
@@ -105,18 +121,76 @@ field 6 (Rear Light Status).
 """
 
 [[message.signal]]
-name = "RearLightUnknownByte2"
+name = "BusAwake"
+start_bit = 0
+length = 8
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+confidence = "confirmed"
+evidence = """
+Byte 0. 1 = the bike is awake, 0 = asleep. The same fact that byte 0 of
+02203606 carries, in the same sense as the lock rather than inverted.
+
+Agrees with the HubLock's own state on 13B76400 in 99/100 and 115/120 frames,
+and is 0 throughout the 4 September corpus, which is a bike that was never
+unlocked. It is 0 through the RLONEN window of the 7 September session too,
+while byte 4 turns the lamp on -- which is what separates the two signals.
+"""
+
+[[message.signal]]
+name = "MaxSpeed"
 start_bit = 16
 length = 8
 byte_order = "big_endian"
 signed = false
 scale = 1
 offset = 0
-confidence = "hypothesis"
+unit = "km/h"
+confidence = "confirmed"
 evidence = """
-Byte 2 is 0x19 (25) while the rear light is on because of an unlock, but 0x00
-when it is on because of an RLONEN command. So it is not the light state. A
-brightness or mode, possibly. Untested.
+CORRECTION -- this signal was called RearLightAwakeLevel and read as a
+brightness percentage. It is not a light signal at all. It is the configured
+maximum assisted speed, the same value 03FF1600 byte 7 carries, mirrored at
+the rear light's address.
+
+CONFIRMED -- by the same six commands, in the same session, as 03FF1600. Byte 2
+followed each one:
+
+    UNLOCK       0100120001030200   byte 2 = 18
+    GTECC:19     0100130001030200   byte 2 = 19
+    GTECC:25     0100190001030200   byte 2 = 25
+    GTECC:15     01000F0001030200   byte 2 = 15
+    GTECC:10     01000A0001030200   byte 2 = 10
+    GTECC:5      0100050001030200   byte 2 =  5
+    GTECC:25     0100190001030200   byte 2 = 25
+    LOCK         0000000000030200   byte 2 =  0
+
+A search over every identifier and every byte position for the commanded
+sequence [18, 19, 25, 15, 10, 5, 25] returned exactly two hits: this byte and
+03FF1600 byte 7. Nothing else on the bus carries the value.
+
+WHY THE OLD READING WAS REASONABLE, AND WHAT ACTUALLY DISPROVED IT. The
+previous note observed correctly that byte 2 held 25 while awake and 0 while
+asleep, and reasoned that 25 in a byte with only two values looked like a
+percentage. Both halves were sound. The trap was that 25 km/h is the EU
+pedelec limit, so the factory value of a configuration byte is indistinguishable
+from a constant until somebody reconfigures it -- and the 0 when asleep is the
+ECU not publishing, not a measured zero.
+
+The test the old note proposed -- command RLONEN on an unlocked bike and see
+where byte 2 lands -- would NOT have caught this. Byte 2 does not respond to
+the lamp at any lock state. What caught it was changing the thing itself.
+
+The 0 while asleep is now read the same way as every other zeroed ECU field:
+absence of data, not a measurement. See nodes.md.
+
+WHAT THIS DOES NOT DISTURB. Byte 0 (BusAwake) and byte 4 (RearLightOn) are
+unaffected and stay confirmed. The observation that separated them from byte 2
+in the first place -- with the bike locked, RLONEN turns byte 4 on while byte 2
+stays 0 -- still holds and now has a plainer explanation: byte 4 is the lamp
+and byte 2 was never about the lamp.
 """
 
 [[message]]
@@ -164,9 +238,16 @@ raw value means rather than inverting it here.
 Six transitions across two sessions, every one following its command:
   UNLOCK -> 1 after 2.12 s, 2.55 s, 2.17 s
   LOCK   -> 0 after 0.32 s, 0.46 s, 0.58 s
-The asymmetry is consistent and worth keeping: unlocking takes about four times
-as long as locking, which is what a motorised latch does and is not what a
-command echo would do.
+
+CORRECTION -- what the asymmetry measures. This was recorded as evidence of a
+motorised latch, on the grounds that unlocking takes about four times as long
+as locking. That reading does not survive: the whole bus shows the same
+asymmetry. 04FF3604, the 30 ms message, starts 2.1-2.6 s after each UNLOCK and
+stops 0.3-0.8 s after each LOCK, in all four unlock and three lock events
+across the three 7 September sessions. So the 2.1 s is the wake sequence
+bringing 89 identifiers up, and this byte is simply reported at the end of it.
+The asymmetry still argues against a command echo, but it says nothing about
+the latch.
 
 Repeated UNLOCK commands on an already-unlocked bike produce no transition, so
 this byte reports actual state and not command receipt. That is why session 2's
@@ -176,6 +257,78 @@ DO NOT use GTFRI's ECU Lock State as a substitute for this signal. With the
 HubLock disabled and no 13B76400 on the bus at all, that field still reported
 lock_state flipping 0 and 1, so it tracks what the IoT module believes rather
 than what the lock did.
+"""
+
+[[message]]
+id = 0x03FF1600
+name = "SpeedLimit_1600"
+length = 8
+extended = true
+cycle_time_ms = 1000
+confidence = "confirmed"
+comment = """
+The configured maximum assisted speed. Published at 1 Hz while the bike is
+awake and absent entirely while it is locked -- in the unlock/lock session the
+first frame arrives 0.8 s after each UNLOCK and the last one lands before each
+LOCK.
+
+Only byte 7 was ever seen to move. The rest held 14 2B 00 01 04 00 13 across
+every session on record, through six speed changes, a lock cycle and a session
+boundary.
+"""
+
+[[message.signal]]
+name = "MaxSpeed"
+start_bit = 56
+length = 8
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+unit = "km/h"
+confidence = "confirmed"
+evidence = """
+CONFIRMED -- tied to a commanded action, six times in one session. The
+set-speed-while-unlocked session sent six AT+GTECC commands to an awake bike
+and byte 7 followed every one of them, on the CAN log's own clock:
+
+    command      byte 7    latency
+    (at open)        18    carried in from the previous session
+    GTECC:19         19    1.39 s
+    GTECC:25         25    1.26 s
+    GTECC:15         15    0.89 s
+    GTECC:10         10    1.21 s
+    GTECC:5           5    0.81 s
+    GTECC:25         25    1.29 s
+
+Six commanded values, six matches, no misses and no intermediate values. The
+message runs at 1 Hz, so a latency of 0.8-1.4 s is one period plus the command
+round trip -- there is no room in that for the byte to have reached the value
+any other way.
+
+CONFIRMED -- the scale, as 1:1 km/h with no offset, over 5 to 25. Six distinct
+commanded values is enough to fix a linear scale outright rather than infer it.
+
+CONFIRMED -- that it persists. The session opened at 18, which is where the
+previous session's last GTECC left it, across an intervening lock and a gap in
+recording. So this is stored configuration and not a transient.
+
+WHY 25 LOOKED LIKE SOMETHING ELSE FOR SO LONG. Every session before the first
+GTECC read 25, because 25 km/h is the EU pedelec limit and nobody had changed
+it. A configuration byte nobody has reconfigured is indistinguishable from a
+constant. See the correction on 02181606 MaxSpeed, which is this same value
+mirrored at the rear light's address and was read as a brightness percentage
+for exactly this reason.
+
+UNKNOWN -- byte 6, which holds 19 and did not move through any of the six
+commands. A second limit of some kind is the obvious guess and there is no
+evidence for it. Note that 19 is also a value GTECC was given, which makes it
+easy to misread a coincidence as a match; byte 6 held 19 both before and after
+that command.
+
+TO DISPROVE. Command a value outside the 5-25 range tested here -- 0, or 40 --
+and see whether byte 7 follows, clamps, or the command is refused. A clamp
+would say the ECU bounds what it accepts, which the range tested cannot show.
 """
 
 # ---------------------------------------------------------------------------
@@ -360,6 +513,19 @@ temperature in degrees Celsius, and the same byte string is relayed in
 each byte is has not been established: <ECU Info> field 12 lists cell maximum,
 cell minimum, MOS and "other" temperatures, and there are more of those than
 there are bytes here.
+
+DO NOT read these six bytes as "the cell temperatures", and in particular do
+not take their maximum as the pack's cell maximum. Across the three
+7 September sessions <ECU Info>'s Cell Temperature Max changes within a
+session -- 29,29,28,28,28 in the first, 28,28,28,29,29,29 in the second --
+while all six bytes of 05FF4606 and 05FF4607 hold still. No byte of either
+frame is the cell maximum. See 05FF4607.Temp5 for the one sensor that can be
+ruled out positively.
+
+The whole corpus spans 27 to 29 degC, so there is not enough range here to
+assign the bytes at all. What would settle it: warm one part of the pack --
+a charge cycle heats the MOS, a discharge heats the cells -- and see which
+bytes move together.
 """
 
 [[message.signal]]
@@ -419,7 +585,19 @@ length = 8
 byte_order = "big_endian"
 unit = "degC"
 confidence = "probable"
-evidence = "0x1B = 27 degC. Sensor identity unknown."
+evidence = """
+0x1B = 27 degC, and the one temperature byte whose identity can be settled by
+elimination: it is NOT a cell sensor.
+
+In every @Track report of every session <ECU Info> gives Cell Temperature Min
+as 28 degC. This byte reads 27. A pack cannot have a cell colder than its
+reported cell minimum, so whatever this sensor measures, the BMS does not
+count it as a cell. It is not the MOS or "other" temperature either -- both
+are reported as 28 or 29 and this byte matched neither in any of the 21
+comparable reports.
+
+Ambient, board or inlet temperature are what is left. Untested.
+"""
 
 [[message.signal]]
 name = "Temp6"
@@ -429,6 +607,1004 @@ byte_order = "big_endian"
 unit = "degC"
 confidence = "probable"
 evidence = "0x1C = 28 degC. Sensor identity unknown."
+
+[[message]]
+id = 0x05FF4610
+name = "BmsPackVoltageCurrent"
+length = 8
+extended = true
+cycle_time_ms = 273
+confidence = "confirmed"
+comment = """
+The BMS reporting the pack terminals: voltage in bytes 0-3, current in bytes
+4-7, both big-endian 32-bit, both at 273 ms. This was the "273 ms, bytes 3 and
+7 varying, at the BMS address, not part of the GTBMI relay" entry in nodes.md.
+
+Two independent confirmations, which is why this is the best-established
+message on the bus after the cell voltages themselves:
+
+1. The current bytes appear VERBATIM in the serial console. The last four
+   bytes of <Battery Status> in +RESP:GTFRI are the pack current, and 27 of
+   the 29 reports across the three 7 September sessions carry byte-for-byte
+   the same value as the nearest frame of this message -- FFFFFFA9, FFFFFF9E,
+   FFFFFFCA and so on, matched to within 0.1 s. The two that differ are
+   adjacent samples of a value that changes every 273 ms.
+
+2. The voltage agrees with a signal confirmed by a different route. Summing
+   the 13 cells of 05FF4602-05FF4605 gives the same number to within 2 mV on
+   96.9 %, 97.1 % and 98.7 % of the three sessions' frames (693 in total),
+   worst case 6 mV. The two are measured and transmitted separately, so they
+   are not the same reading twice, and the residual is the sampling offset
+   between a 273 ms message and a 1044 ms one.
+
+Note the voltage here reads 73-93 mV BELOW what +RESP:GTFRI gives as
+<Main Power Voltage> (median 84 mV over 22 comparable reports). That is expected: GTFRI's figure is the tracker
+measuring its own supply rail, which is why GTFRI still reports a pack voltage
+on a locked bike with the BMS asleep and this message absent. Do not treat the
+two as interchangeable.
+"""
+
+[[message.signal]]
+name = "PackVoltage"
+start_bit = 0
+length = 32
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+unit = "mV"
+confidence = "confirmed"
+evidence = """
+Bytes 0-3, big-endian, mV. 0x0000D176 = 53622 mV, which is exactly the sum of
+the 13 cell voltages at the same moment. Bytes 0-1 have been zero in all 693
+frames recorded, so the field could be 16 bits; 32 is written here because the
+current field beside it demonstrably needs all four of its bytes for the sign.
+Observed range 53562-53631 mV over three sessions.
+"""
+
+[[message.signal]]
+name = "PackCurrent"
+start_bit = 32
+length = 32
+byte_order = "big_endian"
+signed = true
+scale = 1
+offset = 0
+unit = "mA"
+confidence = "confirmed"
+evidence = """
+Bytes 4-7, big-endian, SIGNED, mA. 0xFFFFFFA9 is -87 mA, not 4294967209.
+
+The sign is not an inference. Every frame in all three sessions reads negative
+(-32 to -104 mA), which is what a parked bike does: a small standing draw. The
+same bytes reach the serial console unchanged, where the @Track parser already
+treats the field as two's complement for the same reason.
+
+Sign convention: negative is discharge. Nothing recorded so far charges the
+pack, so the positive direction is untested. A charge cycle would settle it.
+"""
+
+[[message]]
+id = 0x05FF4609
+name = "BmsChargeState"
+length = 7
+extended = true
+cycle_time_ms = 1044
+confidence = "confirmed"
+comment = """
+State of charge and state of health. The BMS sends this unsolicited at 1044 ms
+while the bike is awake; 05124609 is the identical payload returned when the
+IoT module polls for it, which it does every 300 s even while the bike sleeps.
+That poll is how the tracker can report a battery percentage on a locked bike,
+and the pair 02294609 -> 05124609 is one of only five identifiers present on a
+sleeping bus.
+"""
+
+[[message.signal]]
+name = "BmsReportMode"
+start_bit = 0
+length = 8
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+confidence = "hypothesis"
+evidence = """
+Byte 0 is 1 or 3. It is 1 on every 300 s poll reply while the bike is asleep
+and 3 within a second or two of each UNLOCK, so it looks like the same
+awake/asleep distinction that bytes 0 of 02203606 and 02181606 carry. Not
+tested against anything else, and 1 and 3 is an odd pair for a boolean, so
+this may be a mode with values not yet seen.
+"""
+
+[[message.signal]]
+name = "StateOfCharge"
+start_bit = 16
+length = 16
+byte_order = "big_endian"
+signed = false
+scale = 0.1
+offset = 0
+unit = "%"
+confidence = "confirmed"
+evidence = """
+Bytes 2-3, big-endian, 0.1 %. Confirmed against <Scooter Battery Percentage>
+in +RESP:GTFRI at four different values across the whole corpus:
+
+  4 September   0x0370 =  880 ->  88.0 %   serial 88
+  7 Sep, s1     0x03E8 = 1000 -> 100.0 %   serial 100
+  7 Sep, s1     0x03DE =  990 ->  99.0 %   serial 99
+  7 Sep, s2/s3  0x03D4 =  980 ->  98.0 %   serial 98
+
+The step from 1000 to 990 is the strongest part. It happens on the bus at
+t=918 s of the first session, and the serial's own reports go from 100 to 99
+between t=914 s and t=1155 s -- so the CAN value changes inside the gap
+between the two reports that bracket it. The bus leads the console, which is
+the right way round for the bus being the source.
+
+A 12-point range settles the scale. The serial reports whole percent, so the
+0.1 resolution comes from this field being ten times the reported number in
+every one of the four cases.
+"""
+
+[[message.signal]]
+name = "StateOfHealth"
+start_bit = 32
+length = 16
+byte_order = "big_endian"
+signed = false
+scale = 0.1
+offset = 0
+unit = "%"
+confidence = "confirmed"
+evidence = """
+Bytes 4-5, big-endian, 0.1 %. Matches <Battery Status> group 2, which the
+@Track parser calls battery_health_pct:
+
+  4 September   0x03E8 = 1000 -> 100.0 %   serial 100
+  7 September   0x03CA =  970 ->  97.0 %   serial 97
+
+Two values three days apart, both matching. A drop from 100 to 97 in three
+days is not real degradation -- these estimates jump after a charge -- but the
+agreement is what matters here.
+"""
+
+[[message]]
+id = 0x05124609
+name = "BmsChargeStatePolled"
+length = 7
+extended = true
+cycle_time_ms = 300000
+confidence = "confirmed"
+comment = """
+The reply to the IoT module's 02294609 poll, with the same layout as
+05FF4609. Sent every 300 s, and one of the five identifiers that survive on a
+sleeping bus -- so this frame, not the unsolicited one, is what the tracker
+actually reports from most of the time.
+"""
+
+[[message.signal]]
+name = "StateOfCharge"
+start_bit = 16
+length = 16
+byte_order = "big_endian"
+signed = false
+scale = 0.1
+offset = 0
+unit = "%"
+confidence = "confirmed"
+evidence = "As 05FF4609.StateOfCharge; this is the frame the 88/99/100 % readings came from."
+
+[[message.signal]]
+name = "StateOfHealth"
+start_bit = 32
+length = 16
+byte_order = "big_endian"
+signed = false
+scale = 0.1
+offset = 0
+unit = "%"
+confidence = "confirmed"
+evidence = "As 05FF4609.StateOfHealth."
+
+# ---------------------------------------------------------------------------
+# The polled twins of the BMS live channel
+#
+# Every 05FF46xx message the BMS sends unsolicited has a twin at 05124_6xx that
+# the IoT module gets by polling 02294_6xx. Both were on the bus all along; the
+# polls were invisible until the 7 September battery-removal session, because
+# the master runs the full sweep only when the pack is first connected. All
+# eight below carry the same payload as their unsolicited twin, in the same
+# layout, and 4601-4607 are the blocks +RESP:GTBMI relays verbatim, in order.
+#
+# They are recorded separately rather than folded into the 05FF46xx entries
+# because a DBC is keyed by identifier: a decoder that knows only 05FF4602
+# decodes nothing when the same cell voltages arrive as 05124602.
+# ---------------------------------------------------------------------------
+
+[[message]]
+id = 0x05124601
+name = "BmsStatusFlagsPolled"
+length = 6
+extended = true
+confidence = "hypothesis"
+comment = """
+Reply to 02294601. Payload 007300000000, identical to the unsolicited 05FF4601
+and to the first block +RESP:GTBMI relays (0073000000000000, zero-extended to
+eight). Constant in every frame ever recorded, so there is nothing to fit and
+no signals are defined.
+
+Byte 1 = 0x73 with everything else zero has the shape of a flag word -- GTBMI
+places it where a protection/status field would sit -- but a constant is
+consistent with any reading. What would test it: a pack fault, or a second
+pack.
+"""
+
+[[message]]
+id = 0x05124602
+name = "BmsCellVoltages_1_4_Polled"
+length = 8
+extended = true
+confidence = "confirmed"
+comment = "Reply to 02294602. Cells 1-4, as 05FF4602. Relayed verbatim in +RESP:GTBMI."
+
+[[message.signal]]
+name = "Cell1"
+start_bit = 0
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "As 05FF4602.Cell1. 0B10 reads as 0x100B = 4107 mV."
+
+[[message.signal]]
+name = "Cell2"
+start_bit = 16
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "As 05FF4602.Cell2."
+
+[[message.signal]]
+name = "Cell3"
+start_bit = 32
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "As 05FF4602.Cell3."
+
+[[message.signal]]
+name = "Cell4"
+start_bit = 48
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "As 05FF4602.Cell4."
+
+[[message]]
+id = 0x05124603
+name = "BmsCellVoltages_5_8_Polled"
+length = 8
+extended = true
+confidence = "confirmed"
+comment = "Reply to 02294603. Cells 5-8, as 05FF4603. Relayed verbatim in +RESP:GTBMI."
+
+[[message.signal]]
+name = "Cell5"
+start_bit = 0
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "As 05FF4603.Cell5."
+
+[[message.signal]]
+name = "Cell6"
+start_bit = 16
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "As 05FF4603.Cell6."
+
+[[message.signal]]
+name = "Cell7"
+start_bit = 32
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "As 05FF4603.Cell7."
+
+[[message.signal]]
+name = "Cell8"
+start_bit = 48
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "As 05FF4603.Cell8."
+
+[[message]]
+id = 0x05124604
+name = "BmsCellVoltages_9_12_Polled"
+length = 8
+extended = true
+confidence = "confirmed"
+comment = "Reply to 02294604. Cells 9-12, as 05FF4604. Relayed verbatim in +RESP:GTBMI."
+
+[[message.signal]]
+name = "Cell9"
+start_bit = 0
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "As 05FF4604.Cell9."
+
+[[message.signal]]
+name = "Cell10"
+start_bit = 16
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "As 05FF4604.Cell10."
+
+[[message.signal]]
+name = "Cell11"
+start_bit = 32
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "As 05FF4604.Cell11."
+
+[[message.signal]]
+name = "Cell12"
+start_bit = 48
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "As 05FF4604.Cell12."
+
+[[message]]
+id = 0x05124605
+name = "BmsCellVoltage_13_Polled"
+length = 8
+extended = true
+confidence = "confirmed"
+comment = "Reply to 02294605. Cell 13, as 05FF4605. Bytes 2-7 are padding."
+
+[[message.signal]]
+name = "Cell13"
+start_bit = 0
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "As 05FF4605.Cell13."
+
+[[message]]
+id = 0x05124606
+name = "BmsTemperatures_A_Polled"
+length = 3
+extended = true
+confidence = "probable"
+comment = """
+Reply to 02294606. As 05FF4606: 1E1E1D reads as 30, 30, 29 degC. Which sensor
+each byte is remains unassigned -- see 05FF4606 for why, and for the warning
+against reading their maximum as the pack's cell maximum.
+"""
+
+[[message.signal]]
+name = "Temp1"
+start_bit = 0
+length = 8
+byte_order = "big_endian"
+unit = "degC"
+confidence = "probable"
+evidence = "As 05FF4606.Temp1."
+
+[[message.signal]]
+name = "Temp2"
+start_bit = 8
+length = 8
+byte_order = "big_endian"
+unit = "degC"
+confidence = "probable"
+evidence = "As 05FF4606.Temp2."
+
+[[message.signal]]
+name = "Temp3"
+start_bit = 16
+length = 8
+byte_order = "big_endian"
+unit = "degC"
+confidence = "probable"
+evidence = "As 05FF4606.Temp3."
+
+[[message]]
+id = 0x05124607
+name = "BmsTemperatures_B_Polled"
+length = 3
+extended = true
+confidence = "probable"
+comment = "Reply to 02294607. As 05FF4607: 1E1D1D reads as 30, 29, 29 degC."
+
+[[message.signal]]
+name = "Temp4"
+start_bit = 0
+length = 8
+byte_order = "big_endian"
+unit = "degC"
+confidence = "probable"
+evidence = "As 05FF4607.Temp4."
+
+[[message.signal]]
+name = "Temp5"
+start_bit = 8
+length = 8
+byte_order = "big_endian"
+unit = "degC"
+confidence = "probable"
+evidence = "As 05FF4607.Temp5."
+
+[[message.signal]]
+name = "Temp6"
+start_bit = 16
+length = 8
+byte_order = "big_endian"
+unit = "degC"
+confidence = "probable"
+evidence = "As 05FF4607.Temp6."
+
+[[message]]
+id = 0x05124610
+name = "BmsPackVoltageCurrentPolled"
+length = 8
+extended = true
+confidence = "confirmed"
+comment = """
+Reply to 02294610. The pack terminals, same layout as 05FF4610: voltage in
+bytes 0-3, current in bytes 4-7, both big-endian 32-bit, the current signed.
+
+Only four frames exist, all from the battery-removal session, and all four
+decode against the serial console:
+
+  rel  98.76  0000D0E3FFFFFFC4  53475 mV, -60 mA  |  GTFRI: 53.546 V, -60 mA
+  rel 170.08  0000D0E3FFFFFFCA  53475 mV, -54 mA  |  GTFRI: 53.546 V, -54 mA
+  rel 217.02  0000D0E3FFFFFFCA  53475 mV, -54 mA  |  GTFRI: 53.546 V, -60 mA
+  rel 257.11  0000D0E1FFFFFFCF  53473 mV, -49 mA  |  GTFRI: 53.546 V, -54 mA
+
+The current matches exactly in two of four; the other two are 3 s away from
+their report, and the pack current moves every 273 ms. The voltage sits 71 mV
+below GTFRI's <Main Power Voltage>, which is the same offset 05FF4610 shows
+and for the same reason: GTFRI measures the tracker's own supply rail.
+"""
+
+[[message.signal]]
+name = "PackVoltage"
+start_bit = 0
+length = 32
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+unit = "mV"
+confidence = "confirmed"
+evidence = "As 05FF4610.PackVoltage. 0x0000D0E3 = 53475 mV."
+
+[[message.signal]]
+name = "PackCurrent"
+start_bit = 32
+length = 32
+byte_order = "big_endian"
+signed = true
+scale = 1
+offset = 0
+unit = "mA"
+confidence = "confirmed"
+evidence = """
+As 05FF4610.PackCurrent -- big-endian, SIGNED, mA. 0xFFFFFFC4 is -60 mA, and
++RESP:GTFRI reported exactly -60 mA 2.8 s earlier.
+"""
+
+# ---------------------------------------------------------------------------
+# A component seen for the first time at cold boot: AA = 75
+# ---------------------------------------------------------------------------
+
+[[message]]
+id = 0x08F97500
+name = "Node75HardwareVersion"
+length = 8
+extended = true
+confidence = "probable"
+comment = """
+Reply to 02417500, in a request/reply family that had never been seen:
+02 41 75 xx -> 08 F9 75 xx. Both appeared for the first time in the
+7 September battery-removal session, 13 frames each, only during the sweep the
+master runs when the pack is connected.
+
+AA = 75 is a component the bus had never revealed. Under the nodes.md scheme
+this is component 7, channel 5, and channel 5 is the identity channel at every
+other address: BB = 00 hardware version, BB = 01 firmware version. The payload
+shape agrees -- a single 32-bit value in bytes 0-3 with bytes 4-7 zero, exactly
+like 03FF1500, 04F93500 and 05124500.
+
+It is "probable" and not "confirmed" because <ECU Info> carries only three
+version groups and all three are already accounted for by AA = 15, 35 and 45.
+This component's version string reaches the serial console nowhere, so there
+is no ground truth to check it against. What would settle it: a component
+whose firmware version is known independently, or the spec PDF in reference/.
+"""
+
+[[message.signal]]
+name = "HardwareVersion"
+start_bit = 0
+length = 32
+byte_order = "big_endian"
+signed = false
+confidence = "probable"
+evidence = "Bytes 0-3 = 0x000000F4 = 244, constant across all 13 frames."
+
+[[message]]
+id = 0x08F97501
+name = "Node75FirmwareVersion"
+length = 8
+extended = true
+confidence = "probable"
+comment = "Reply to 02417501. See 08F97500 for the family and the caveat."
+
+[[message.signal]]
+name = "FirmwareVersion"
+start_bit = 0
+length = 32
+byte_order = "big_endian"
+signed = false
+confidence = "probable"
+evidence = "Bytes 0-3 = 0x00000015 = 21, constant across all 13 frames."
+
+[[message]]
+id = 0x05124614
+name = "BmsCellExtremes"
+length = 8
+extended = true
+confidence = "confirmed"
+comment = """
+Highest and lowest cell, with which cell each one is, and the spread between
+them. Returned on request (02294614) during the wake-up enumeration.
+
+Confirmed by internal consistency against a signal established independently:
+all 8 frames recorded across the three 7 September sessions agree exactly with
+the maximum and minimum of the 13 cell voltages decoded from 05FF4602-4605 at
+the same moment -- both values, BOTH INDICES, and the spread:
+
+  10220B101400000E   4130 mV @ 11,  4116 mV @ 0,  spread 14
+  101F0B101100000E   4127 mV @ 11,  4113 mV @ 0,  spread 14
+  101D0B101000000D   4125 mV @ 11,  4112 mV @ 0,  spread 13
+
+Eight frames, five fields each, no misses. Two indices matching by chance
+across three sessions is not a plausible coincidence, and the values move
+between sessions, so this is not a constant agreeing with a constant.
+
+WORTH NOTING: the voltages here are BIG-endian, while the cell voltages in
+05FF4602-4605 are little-endian. The same device uses both. Read big-endian,
+0x1022 = 4130 mV, a credible cell; read little-endian it would be 8720 mV,
+which is impossible, so the endianness is not a matter of taste here.
+
+Cell indices are 0-based: cell 1 of the pack is index 0.
+"""
+
+[[message.signal]]
+name = "MaxCellVoltage"
+start_bit = 0
+length = 16
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+unit = "mV"
+confidence = "confirmed"
+evidence = "Bytes 0-1 big-endian. 4130, 4127 and 4125 mV, each the true maximum of the 13 cells."
+
+[[message.signal]]
+name = "MaxCellIndex"
+start_bit = 16
+length = 8
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+confidence = "confirmed"
+evidence = "Byte 2. Always 11 so far, and cell index 11 was in fact the highest in all 8 frames."
+
+[[message.signal]]
+name = "MinCellVoltage"
+start_bit = 24
+length = 16
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+unit = "mV"
+confidence = "confirmed"
+evidence = "Bytes 3-4 big-endian. 4116, 4114, 4113 and 4112 mV, each the true minimum."
+
+[[message.signal]]
+name = "MinCellIndex"
+start_bit = 40
+length = 8
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+confidence = "confirmed"
+evidence = "Byte 5. Always 0, and cell index 0 was in fact the lowest in all 8 frames."
+
+[[message.signal]]
+name = "CellVoltageSpread"
+start_bit = 48
+length = 16
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+unit = "mV"
+confidence = "confirmed"
+evidence = """
+Bytes 6-7 big-endian. Equal to MaxCellVoltage - MinCellVoltage in all 8
+frames: 14, 14, 13 mV. Redundant with the two fields above, which is what
+makes it a useful check that the frame has been read correctly.
+"""
+
+[[message]]
+id = 0x05124611
+name = "BmsCapacity"
+length = 8
+extended = true
+confidence = "confirmed"
+comment = """
+Pack capacity: how much charge the pack holds when full, and how much is left.
+Returned on request (02294611) during the wake-up enumeration.
+
+Confirmed by arithmetic against a signal confirmed by another route. Remaining
+divided by full-charge, rounded to whole percent, is the state of charge that
+05FF4609 reports and that the serial console repeats:
+
+  13771 / 13964 = 98.62 %  ->  99   and SOC read 990
+  13747 / 13964 = 98.45 %  ->  98   and SOC read 980
+  13736 / 13964 = 98.37 %  ->  98   and SOC read 980
+
+Remaining also falls monotonically across the three sessions, in the same
+order and over the same hours as the pack voltage and the state of charge.
+
+Bytes 0-1 hold 97, which is the state of health the serial console reports,
+so the same number appears here and in 05FF4609 -- consistent, and a useful
+cross-check on the frame.
+"""
+
+[[message.signal]]
+name = "StateOfHealth"
+start_bit = 0
+length = 16
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+unit = "%"
+confidence = "confirmed"
+evidence = """
+Bytes 0-1 big-endian, whole percent. 0x0061 = 97, matching <Battery Status>
+battery_health_pct in all three sessions. Note the units differ from
+05FF4609.StateOfHealth, which carries the same quantity in 0.1 %.
+"""
+
+[[message.signal]]
+name = "FullChargeCapacity"
+start_bit = 16
+length = 16
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+unit = "mAh"
+confidence = "confirmed"
+evidence = """
+Bytes 2-3 big-endian, mAh. 0x368C = 13964, unchanged in all three sessions,
+which is what a full-charge estimate should be over three hours.
+
+Consistency: 13964 at 97 % health implies a design capacity near 14400 mAh,
+which is a round number for a pack whose own model string is RP13S35A
+(13 cells in series -- see 05124502). That is arithmetic, not evidence; the
+confirmation is the SOC division in the message comment.
+"""
+
+[[message.signal]]
+name = "RemainingCapacity"
+start_bit = 32
+length = 32
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+unit = "mAh"
+confidence = "confirmed"
+evidence = """
+Bytes 4-7 big-endian, mAh. 13771 -> 13747 -> 13736 across the three sessions,
+falling monotonically. Divided by FullChargeCapacity it reproduces the
+reported state of charge in every session.
+
+Bytes 4-5 have always been zero. 32 bits is written here because the field
+sits in the four bytes the frame has left; a pack this size will never fill
+more than 16 of them.
+"""
+
+[[message]]
+id = 0x05FF4600
+name = "BmsConfig"
+length = 6
+extended = true
+cycle_time_ms = 5223
+confidence = "probable"
+comment = """
+Payload 0D0300900303, unchanged in every session. Byte 0 is 0x0D = 13, the
+number of cells -- which +RESP:GTBMI states independently and which
+05FF4602-05FF4605 supply exactly (4+4+4+1). The remaining five bytes are
+0x03, 0x0090, 0x03, 0x03 and are not decoded; a pack configuration of some
+kind, but nothing in the corpus varies them, so nothing can be fitted.
+"""
+
+[[message.signal]]
+name = "CellCount"
+start_bit = 0
+length = 8
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+confidence = "probable"
+evidence = """
+Byte 0 = 13. Agrees with the cell count +RESP:GTBMI reports and with the
+number of cell voltage values on the bus. Still "probable" rather than
+confirmed because a constant agreeing with a constant is weak: a pack with a
+different cell count would settle it, and there is only one pack.
+"""
+
+[[message]]
+id = 0x05124615
+name = "BmsTempExtremes"
+length = 6
+extended = true
+confidence = "probable"
+comment = """
+Highest and lowest temperature with sensor indices, by exact analogy with
+05124614's treatment of the cell voltages. Returned on request (02294615).
+
+  4 September onwards, s1     1C011C0100xx   28 @ 1, 28 @ 1
+  7 September, s2 and s3      1D011C0301xx   29 @ 1, 28 @ 3
+
+The two readings match <ECU Info>'s Cell Temperature Max and Min in the second
+and third sessions (29 and 28) and in three of the five reports of the first.
+The structural parallel with 05124614 -- value, index, value, index -- is what
+makes the layout probable rather than a guess.
+
+Not confirmed, and it will not be from this corpus: every temperature anywhere
+in it is 27, 28 or 29 degC, so a field that reads 28 agrees with almost
+anything. The last two bytes vary between 0x0010/0x00FF and 0x0100/0x01FF and
+are not decoded.
+
+Note the sensor indices here are 1-based, unlike the 0-based cell indices in
+05124614. That is not a typo: index 1 picks out the byte that carries the
+matching value in 05FF4606 only under 1-based numbering.
+"""
+
+[[message.signal]]
+name = "MaxTemp"
+start_bit = 0
+length = 8
+byte_order = "big_endian"
+unit = "degC"
+confidence = "probable"
+evidence = "Byte 0. 28 degC in the first session, 29 in the other two, matching Cell Temperature Max."
+
+[[message.signal]]
+name = "MaxTempIndex"
+start_bit = 8
+length = 8
+byte_order = "big_endian"
+confidence = "hypothesis"
+evidence = "Byte 1. Always 1. A sensor index by analogy with 05124614; nothing has moved it."
+
+[[message.signal]]
+name = "MinTemp"
+start_bit = 16
+length = 8
+byte_order = "big_endian"
+unit = "degC"
+confidence = "probable"
+evidence = "Byte 2. 28 degC in all three sessions, matching Cell Temperature Min."
+
+[[message.signal]]
+name = "MinTempIndex"
+start_bit = 24
+length = 8
+byte_order = "big_endian"
+confidence = "hypothesis"
+evidence = "Byte 3. 1 in the first session, 3 in the other two. Moves, which is why it looks like an index."
+
+# ---------------------------------------------------------------------------
+# Component identity, confirmed verbatim against <ECU Info>
+# ---------------------------------------------------------------------------
+#
+# The <Firmware Version> and <Hardware Version> fields of <ECU Info> are each
+# three 8-hex-digit groups. All six groups are assembled, byte for byte, from
+# six CAN replies at three addresses:
+#
+#   serial fw = 0000004A 00000004 01030000
+#   serial hw = 000000C3 000000EB 05000000
+#               03FF1501 04F93501 05124501   BB=01, firmware
+#               03FF1500 04F93500 05124500   BB=00, hardware
+#                 AA=15    AA=35    AA=45
+#
+# The two-byte BMS replies are zero-extended to four bytes in the report; that
+# is the only difference anywhere.
+#
+# This is what establishes BB=00 as "hardware version" and BB=01 as "firmware
+# version", and it is the evidence for the AA channel scheme in nodes.md. The
+# messages are named by address rather than by component, because which
+# physical component sits at AA=15 and AA=35 is still a hypothesis.
+
+[[message]]
+id = 0x03FF1500
+name = "Node15HardwareVersion"
+length = 8
+extended = true
+confidence = "confirmed"
+comment = "Reply to 02191500. 0x000000C3 = group 1 of <ECU Info> <Hardware Version>, verbatim."
+
+[[message.signal]]
+name = "HardwareVersion"
+start_bit = 0
+length = 32
+byte_order = "big_endian"
+signed = false
+confidence = "confirmed"
+evidence = "Bytes 0-3 = 0x000000C3. Appears as the first group of the serial's hardware version."
+
+[[message]]
+id = 0x03FF1501
+name = "Node15FirmwareVersion"
+length = 8
+extended = true
+confidence = "confirmed"
+comment = "Reply to 02191501. 0x0000004A = group 1 of <ECU Info> <Firmware Version>, verbatim."
+
+[[message.signal]]
+name = "FirmwareVersion"
+start_bit = 0
+length = 32
+byte_order = "big_endian"
+signed = false
+confidence = "confirmed"
+evidence = "Bytes 0-3 = 0x0000004A. Appears as the first group of the serial's firmware version."
+
+[[message]]
+id = 0x04F93500
+name = "Node35HardwareVersion"
+length = 8
+extended = true
+confidence = "confirmed"
+comment = "Reply to 02213500. 0x000000EB = group 2 of <ECU Info> <Hardware Version>, verbatim."
+
+[[message.signal]]
+name = "HardwareVersion"
+start_bit = 0
+length = 32
+byte_order = "big_endian"
+signed = false
+confidence = "confirmed"
+evidence = "Bytes 0-3 = 0x000000EB. Appears as the second group of the serial's hardware version."
+
+[[message]]
+id = 0x04F93501
+name = "Node35FirmwareVersion"
+length = 8
+extended = true
+confidence = "confirmed"
+comment = "Reply to 02213501. 0x00000004 = group 2 of <ECU Info> <Firmware Version>, verbatim."
+
+[[message.signal]]
+name = "FirmwareVersion"
+start_bit = 0
+length = 32
+byte_order = "big_endian"
+signed = false
+confidence = "confirmed"
+evidence = "Bytes 0-3 = 0x00000004. Appears as the second group of the serial's firmware version."
+
+[[message]]
+id = 0x05124500
+name = "Node45HardwareVersion"
+length = 2
+extended = true
+confidence = "confirmed"
+comment = """
+Reply to 02294500. 0x0500 = group 3 of <ECU Info> <Hardware Version>, which
+the report writes as 05000000 -- these two bytes zero-extended. AA=45 is the
+BMS: 05124502 at the same address carries its model string.
+"""
+
+[[message.signal]]
+name = "HardwareVersion"
+start_bit = 0
+length = 16
+byte_order = "big_endian"
+signed = false
+confidence = "confirmed"
+evidence = "Bytes 0-1 = 0x0500, the leading half of the serial's third hardware group."
+
+[[message]]
+id = 0x05124501
+name = "Node45FirmwareVersion"
+length = 2
+extended = true
+confidence = "confirmed"
+comment = "Reply to 02294501. 0x0103 = group 3 of <ECU Info> <Firmware Version>, written 01030000 in the report."
+
+[[message.signal]]
+name = "FirmwareVersion"
+start_bit = 0
+length = 16
+byte_order = "big_endian"
+signed = false
+confidence = "confirmed"
+evidence = "Bytes 0-1 = 0x0103, the leading half of the serial's third firmware group."
+
+[[message]]
+id = 0x05124502
+name = "BmsModelString"
+length = 8
+extended = true
+confidence = "confirmed"
+comment = """
+The battery pack's model string in ASCII: 5250313353333541 is "RP13S35A".
+Reply to 02294502, at the BMS identity address.
+
+No signals are defined -- DBC has no string type and splitting it into eight
+one-byte integers would make it less readable, not more. The value is the
+finding.
+
+WHY IT IS WORTH HAVING. "13S" is 13 cells in series, which independently
+corroborates the cell count that +RESP:GTBMI reports and that
+05FF4602-05FF4605 supply. It also confirms AA=45 as the battery's identity
+channel, which is the keystone of the AA scheme in nodes.md: 45 is identity
+and 46 is live data for the same component, so 15/16 and 35/36 are read the
+same way.
+"""
+
+[[message]]
+id = 0x05124503
+name = "BmsManufactureInfo"
+length = 8
+extended = true
+confidence = "hypothesis"
+comment = """
+Reply to 02294503, unchanged in every session: 00150C0900000C62.
+
+Bytes 1-3 are 0x15 0x0C 0x09 = 21, 12, 9, which reads as a manufacture date of
+9 December 2021, and bytes 6-7 are 0x0C62 = 3170, which would be a serial
+number within that batch. Both are guesses from shape alone: nothing in the
+corpus varies, and there is one pack.
+
+What would test it: read this frame from a second pack. A different date and a
+different last word, with the same layout, would settle it; anything else
+would not.
+"""
 
 # ---------------------------------------------------------------------------
 # Confirmed against the wall clock
@@ -474,16 +1650,443 @@ low 10 bits as active within one session, but the 7 September session ran the
 field from 509 to 1215, straight past the 1023 where a 10-bit field would wrap,
 monotonically and with every delta 1.
 
+CONFIRMED -- that it keeps counting with the recorder switched off. The three
+7 September sessions are one continuous run of this counter, to the exact
+tick: it ends session 1 at 1215 and begins session 2 at 1389, and the wall
+clock gap is 1740 s = 174 ticks; it ends session 2 at 1425 and begins session
+3 at 1489, gap 640 s = 64 ticks. Both exact. So the count is tied to elapsed
+time and not to anything the recorder does, and those three sessions are one
+unbroken 10,070 s of bike uptime with no power cycle in between -- which is
+what makes them comparable with each other.
+
+A fourth gap reproduces it after the pack removals reset the count. The
+reboot session ends at 124 and the max-speed session begins at 226, and the
+gap between those two frames is 1020.0 s = 102 ticks. Exact again, and this
+one matters more than the first three: the recorder was not merely switched
+off across it, the bike was left alone for 17 minutes with nothing observing
+it at all, and the counter still arrived at the value elapsed time predicts.
+
+CONFIRMED -- that an IoT reboot does not reset it. Only pack power-on does.
+The reboot session issued three REBOOT commands, all three acknowledged by
++ACK:GTRTO and all three corroborated by a +RESP:GTPNA / +RESP:GTPFA pair,
+and across all of them this counter ran 48 -> 124 with every delta exactly 1
+and no reset. So the reset condition established from the battery-removal
+session is specific: the pack, not the IoT module, and not the ECU coming
+back up. This is what separates the two readings of "power-cycle the bike".
+
+RESOLVED -- which component sends it, as far as the address scheme goes. It is
+AA=34, and 04FF3604 (the 30 ms message) and 02203606 (the headlight bit) are
+AA=36 and AA=35's neighbours in the same component group. See nodes.md: AA
+reads as <component><channel>, and channel 4 is a 10 s counter. This is the
+only one of the three such counters that runs while the bus sleeps, so
+whatever component 3 is, it stays powered through sleep. Three of the other
+identifiers at that component are the fastest and the slowest messages on the
+bus, which is what a controller looks like.
+
+CORRECTION -- it is not powered permanently, only through sleep. That earlier
+wording is disproved by the 7 September battery-removal session: with the pack
+out, this identifier stops with everything else. Component 3 is supplied from
+the pack.
+
 UNKNOWN -- whether it is 16 or 32 bits. Bytes 0-1 are always zero, so they
 could be the high half of a 32-bit value. Separating the two needs more than
-7.6 days of continuous uptime, which is when a 16-bit field would wrap.
+7.6 days of continuous uptime, which is when a 16-bit field would wrap. The
+longest continuous run recorded is 15,160 s.
 
-UNKNOWN -- which component sends it, and what event starts the count.
+RESOLVED -- what event starts the count: pack power-on. The 7 September
+battery-removal session pulled the pack four times, and the counter behaved
+identically every time: it read 2282 before the first removal, and after each
+of the four restores its first frame arrived +10.009, +9.992, +10.010 and
++10.011 s later carrying 0. Four resets out of four, each exactly one tick
+after power returned. This also settles the earlier drop from 2878 to 509
+between 4 and 7 September: the pack had been off the bike.
+
+That makes this counter volatile, which separates it from 02F82400. Over the
+same four sessions 02F82400 ran 965 -> 969 -> 971 -> 980 -> 981 -> 987 -> 992
+-> 994 without a single reset, including across the four pack removals. Two
+counters, two components, one held in volatile memory and one not.
 """
 
 # ---------------------------------------------------------------------------
 # Not decoded, but worth writing down
 # ---------------------------------------------------------------------------
+
+[[message]]
+id = 0x02F82400
+name = "AwakeTime_2400"
+length = 8
+extended = true
+cycle_time_ms = 10000
+confidence = "confirmed"
+comment = """
+A second 10-second counter, at AA=24, and NOT the same quantity as
+04FF3400. This one counts only the time the bus spends awake.
+
+Proved by the sleep gaps. Between session 1 and session 2 the bike slept for
+2390 s and this counter advanced by 2; between sessions 2 and 3 it slept 947 s
+and it advanced by 1. Over the same two gaps 04FF3400 advanced by 174 and 64,
+exactly the wall clock. Within a session the two run at the same rate, so the
+difference is not the scale: this counter stops when the bus does.
+
+It also skips correctly across the short sleep inside session 2. The bus was
+down from 113.6 s to 127.0 s, and the counter advanced 1 tick over the 20 s of
+wall clock that straddles it -- about 7 s of which the bus was awake.
+
+Cumulative total when first recorded: 965 ticks, so this bike has spent about
+2.7 hours awake since whatever last reset the field.
+
+03FF1400 is the same quantity at another address. See nodes.md for the three
+semantics side by side. 05FF4400 used to be listed with them and is not a
+clock at all; see BmsSequence_4400.
+
+It is also the non-volatile one. It ran 965 -> 969 -> 971 -> 980 -> 981 -> 987
+-> 992 -> 994 across the four sessions without a single reset, and the last
+step spans the four pack removals of the battery-removal session. 04FF3400
+resets at every one of them.
+"""
+
+[[message.signal]]
+name = "AwakeTime"
+start_bit = 0
+length = 16
+byte_order = "little_endian"
+signed = false
+scale = 10
+offset = 0
+unit = "s"
+confidence = "confirmed"
+evidence = """
+Bytes 0-1, LITTLE-endian, 10 s per count. C503 reads as 0x03C5 = 965, and the
+five frames of session 1 run 965, 966, 967, 968, 969 at 10 s apart. Read
+big-endian the sequence would be 0xC503, 0xC603, ... jumping by 256 a step,
+which no clock does. The three sessions run 965-969, 971-980, 981-987
+continuously.
+
+Every one of the 22 steps recorded is exactly +1. Bytes 2-7 are always zero.
+
+Note the endianness differs from 04FF3400, which is big-endian. Two counters,
+two conventions, on the same bus.
+"""
+
+[[message]]
+id = 0x03FF1400
+name = "AwakeTime_1400"
+length = 8
+extended = true
+cycle_time_ms = 10000
+confidence = "confirmed"
+comment = """
+Cumulative awake time again, at AA=14, big-endian and 32 bits wide. Same
+quantity and same rate as 02F82400, different origin: it read 0 at the start
+of the 7 September corpus and 16 at the end, so it had been reset shortly
+before, where 02F82400 was already at 965.
+
+Advanced by 1 over the 2402 s sleep between sessions 1 and 2 and by 1 over the
+961 s sleep between 2 and 3, against 240 and 96 ticks of wall clock. So it too
+counts awake time and not elapsed time.
+"""
+
+[[message.signal]]
+name = "AwakeTime"
+start_bit = 0
+length = 32
+byte_order = "big_endian"
+signed = false
+scale = 10
+offset = 0
+unit = "s"
+confidence = "confirmed"
+evidence = """
+Bytes 0-3 big-endian, 10 s per count. 0x0000000A = 10. Runs 0-3 in session 1,
+4-11 in session 2, 12-16 in session 3, every step exactly +1, and skips the
+short sleep inside session 2 exactly as 02F82400 does.
+"""
+
+[[message]]
+id = 0x05FF4400
+name = "BmsSequence_4400"
+length = 4
+extended = true
+confidence = "probable"
+comment = """
+A counter the BMS increments once per frame of this message. NOT a clock.
+
+CORRECTION. This was recorded as "BmsAwakeTime_4400", a fourth 10-second
+counter that reset after a long sleep, and the whole reading was wrong. It
+survived three sessions because this message is usually sent about every
+10.5 s, so the count and the wall clock advanced together by coincidence.
+
+The 7 September battery-removal session broke the coincidence. There the
+transmit intervals are 3.1, 68.3, 4.2, 42.8, 4.1, 35.9, 4.1, 27.7, 2.7, 10.5
+and 10.5 s, and the value steps by exactly +1 at every one of them. A 10 s
+tick cannot advance by 1 in 2.7 s, and cannot advance by only 1 across 68.3 s.
+
+What is true instead, over the whole corpus: the value equals the frame's
+index within the session, 0, 1, 2, ..., in all 37 frames of all four
+sessions, with no exception and no gap.
+
+CONSEQUENCE -- the deep-sleep threshold experiment recorded here is void. It
+was going to lock the bike, wait a measured interval, unlock, and read this
+field as elapsed time. It is a frame index, so it would have measured nothing.
+The 51 s / 947 s bracket that came from it should not be relied on.
+
+It stays "probable" rather than "confirmed" because "counts frames" and
+"counts an event that happens once per frame" cannot be told apart from the
+recordings. What is confirmed is the negative: it does not measure time.
+"""
+
+[[message.signal]]
+name = "Sequence"
+start_bit = 0
+length = 32
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+confidence = "probable"
+evidence = """
+Bytes 0-3 big-endian. Value == frame index in 37 of 37 frames across four
+sessions: 0-4, 0-10, 0-8 and 0-11.
+
+It did not reset at any of the four pack removals in the battery-removal
+session, while every counter on the bike itself did. That is expected and is
+worth keeping: the BMS travels inside the pack, so pulling the pack off the
+bike never interrupts its supply. It is independent support for AA=44/45/46
+being inside the battery.
+"""
+
+# ---------------------------------------------------------------------------
+# The authentication channel: AA=26
+# ---------------------------------------------------------------------------
+
+[[message]]
+id = 0x02FF2602
+name = "AuthNonce_2602"
+length = 8
+extended = true
+cycle_time_ms = 10000
+confidence = "probable"
+comment = """
+Eight bytes of high-entropy data, fresh every time, every 10 s while the bike
+is awake. Every frame recorded is unique:
+
+  1DF37DBD1F0BFC27   5B3BA3150375D83B   5D730D0D3E702E5F
+  A243CE652C7E6F53   DAF3C66533E81ED7   3D13C50D00ED4D2B
+
+No signals are defined and none should be: a value that is different every
+time carries no field to fit. Writing it down is the finding.
+
+WHY THIS LOOKS LIKE AUTHENTICATION rather than noise. It arrives 30 ms after
+each tick of 02F82400, the awake-time counter, in every instance -- a counter
+paired with an unpredictable value is the shape of a rolling code, and a
+counter is exactly what stops one being replayed. The same address, AA=26,
+carries the challenge that MEULK produces (02472602).
+
+Bytes 0-7 all vary, entropy 2.5 bits per byte over 7 frames, which is as high
+as 7 samples can show. Nothing in it correlates with anything measured.
+
+TREAT WITH CARE. If this is an immobiliser handshake then replaying or forging
+it is the interesting part, and this project does not transmit. Never put a
+transmitter on this identifier as a flag on the capture path.
+"""
+
+[[message]]
+id = 0x02472602
+name = "AuthChallengeMeUnlock"
+length = 8
+extended = true
+confidence = "confirmed"
+comment = """
+A single frame of eight high-entropy bytes, sent once per MEULK command.
+
+Twice recorded, twice different: C2D31EB512687FF3 on 7 September and
+52539E5502CBE49B on 4 September. Same address family as the 10 s nonce
+(AA=26), unique TT=47.
+
+It opens a fixed five-second exchange that is byte-for-byte identical in both
+corpora apart from the challenge itself:
+
+  02472602  <8 random bytes>   x1
+  08122602  0100000000000000   x4   first reply 0.07 s later
+  02407600  0100000000000000   x5
+  08F97603  0101000000000000   x6
+
+The sequence runs with the bus otherwise ASLEEP -- in the 7 September session
+it happened 27 s after LOCK -- so whatever it releases does not need the ECU
+awake.
+
+CONFIRMED -- this exchange releases the battery. The battery-removal session
+issued MEULK four times and the pack came off the bike four times. Each time,
+the exchange ran and then the ENTIRE BUS went silent, heartbeat included, at
++2.98, +3.00, +3.11 and +3.04 s after the +ACK:GTRTO. The serial console kept
+running on its own backup cell throughout and reported main_power_v = 0.000 in
+every blackout against 53.5 V outside them, so pack power really was gone and
+not merely quiet.
+
+There is no unexplained blackout in the session and no MEULK without one.
+
+The 3.0 s is not operator reaction time: it varies by 0.07 s over four trials,
+which no hand achieves, and it falls at the end of the CAN exchange rather than
+at a fixed offset from the command. The disconnection follows the handshake.
+What is NOT established is the mechanism -- whether the pack contactor opens
+and the operator then lifts a dead pack out, or the latch releases and the
+contacts break as the pack moves. Both fit. Telling them apart needs the pack
+released and left in place.
+
+Those four identifiers plus the five that survive a sleeping bus plus the four
+light identifiers are exactly the 13 in the 4 September corpus, which accounts
+for that recording completely.
+"""
+
+# ---------------------------------------------------------------------------
+# Not decoded, but worth writing down
+# ---------------------------------------------------------------------------
+
+[[message]]
+id = 0x04FF3604
+name = "Unknown_3604"
+length = 8
+extended = true
+cycle_time_ms = 30
+confidence = "hypothesis"
+comment = """
+The fastest message on the bus at 30 ms, and the most valuable unknown. Not
+decoded, but enough is now known to rule things out and to say what to record
+next.
+
+Layout, identical in all three 7 September sessions (1308, 2703 and 1881
+frames):
+
+  byte 0  always 0        byte 4  always 0
+  byte 1  1 to 9          byte 5  200, or 0 for the first second after waking
+  byte 2  always 0        byte 6  0 or 1, in brief bursts around a wake
+  byte 3  2 to 4          byte 7  always 0
+
+So bytes 0-1 and 2-3 are two 16-bit values, both far below 256, and bytes 4-5
+hold the constant 200.
+
+NOT A LAMP. Byte 1 has mean 4.47 and byte 3 mean 3.05, both fluctuating every
+30 ms with no correlation between them (r = 0.07). That is two analogue inputs
+idling at a small offset, sampled at 33 Hz. A lamp does not need 33 Hz and
+does not need two noisy channels. Whatever the address AA=36 means, this is
+not the headlight's own traffic.
+
+WHAT IT IS PROBABLY. Two ADC channels reading near zero on a stationary bike,
+with 200 as a fixed limit or scale. The torque sensor, the throttle and the
+motor current are all in that shape and all read zero here. The bike has never
+been ridden, so a channel that is zero when stationary cannot be told from a
+channel that is broken or from an offset.
+
+WHAT WOULD SETTLE IT, in order of cost:
+  1. Ride it. Any motion at all separates speed and torque from everything
+     that stays flat, and this message will move first because it is fastest.
+  2. Turn the throttle and squeeze each brake on the bench with the bike
+     unlocked. Those move one channel at a time without the bike moving.
+  3. Watch byte 5. It sits at 0 for the first second after each wake and then
+     goes to 200 and stays. If 200 is a limit, riding should not change it.
+
+USE THIS MESSAGE AS THE WAKE DETECTOR. Its active runs bound the awake window
+better than anything else on the bus: they begin 2.1-2.6 s after each UNLOCK
+and end 0.3-0.8 s after each LOCK, over four unlocks and three locks. That is
+how the lock latency asymmetry was shown to be the bus waking rather than a
+latch -- see 13B76400.Unlocked.
+"""
+
+[[message.signal]]
+name = "AnalogueA"
+start_bit = 0
+length = 16
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+confidence = "hypothesis"
+evidence = """
+Bytes 0-1. Byte 0 has been zero in all 5892 frames recorded, so the width is a
+guess; 16 bits is written because bytes 2-3 clearly pair the same way.
+Stationary value 1 to 9, mean 4.47, resampling every 30 ms. Unnamed on purpose:
+calling it Torque or Throttle would record a guess as a fact.
+"""
+
+[[message.signal]]
+name = "AnalogueB"
+start_bit = 16
+length = 16
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+confidence = "hypothesis"
+evidence = """
+Bytes 2-3. Stationary value 2 to 4, mean 3.05, uncorrelated with AnalogueA
+(r = 0.07) -- which is the reason to believe they are two separate channels
+rather than one 32-bit value.
+"""
+
+[[message.signal]]
+name = "Constant200"
+start_bit = 32
+length = 16
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+confidence = "hypothesis"
+evidence = """
+Bytes 4-5. Holds 200 (0xC8) in all but the first second after a wake, where it
+is 0, and in a 90 ms blip during a re-unlock. Named for what it is rather than
+what it might mean. A limit, a scale or a commanded setpoint would all look
+like this; only riding will tell them apart.
+"""
+
+[[message]]
+id = 0x03FF1603
+name = "Unknown_1603"
+length = 8
+extended = true
+cycle_time_ms = 105
+confidence = "hypothesis"
+comment = """
+105 ms, and constant for a whole session, which is a strange pair. Bytes 0-3
+big-endian read as a value very close to the pack voltage:
+
+  session 1   0x0000D11F = 53535       pack was 53620-53631 mV
+  session 2   0x0000D10E = 53518       pack was 53580-53592 mV
+  session 3   0x0000D0DC = 53468       pack was 53562-53576 mV
+
+It falls between sessions in the same order as the pack does, and sits 90 to
+110 mV below it. But 05FF4610's pack voltage moves by about 12 mV within a
+session while this does not move at all, so it cannot be a live measurement of
+the same thing. A value latched when the bus wakes would look exactly like
+this.
+
+Worth having because of where it is: AA=16 is the address that carries the
+rear light bit, and a component that reports a pack voltage is not a rear
+lamp. That is part of the argument in nodes.md that AA names a controller
+rather than a light.
+
+WHAT WOULD DISPROVE "latched at wake": unlock, wait for the value, then load
+the pack hard enough to move 05FF4610 by more than 100 mV, and see whether
+this follows. If it does, it is a filtered live reading and the constancy was
+only a symptom of a very quiet bench.
+"""
+
+[[message.signal]]
+name = "VoltageLike"
+start_bit = 0
+length = 32
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+unit = "mV"
+confidence = "hypothesis"
+evidence = """
+Bytes 0-3 big-endian. Three values, one per session, all within 0.2 % of the
+pack voltage at the time. The unit is written as mV to make the comparison
+easy to run; it is a hypothesis, not a measurement, and one value per session
+is three data points.
+"""
 
 [[message]]
 id = 0x03FF1000
@@ -493,8 +2096,49 @@ extended = true
 cycle_time_ms = 105
 confidence = "probable"
 comment = """
-A heartbeat. 7243 of the 7588 frames in the 4 September corpus, every 105 ms,
-payload 0840112200000001, which never varies once. A fixed payload at a fixed
-rate carries no information, so no signals are defined. Node field 10->00
-appears nowhere else.
+A heartbeat. Every 105 ms, payload 0840112200000001. It runs while the bus
+sleeps, so it is one of the five identifiers a locked bike still sends. Node
+field 10->00 appears nowhere else.
+
+CORRECTION -- it is not invariant. This was recorded as "never varies",
+byte-identical across 80,872 frames of four sessions. That was true of every
+recording made up to then and it was still the wrong conclusion, because not
+one of those recordings contained a cold boot. The battery-removal session
+supplied four, and in each of them byte 0 is 0x00 for the first two seconds
+after power returns and 0x08 for ever after. See SystemReady below.
+
+The remaining seven bytes have never varied, across 83,259 frames.
+
+It stays "probable" rather than confirmed because nothing has tied it to a
+component or an action. Calling it a heartbeat is an inference from its shape.
+"""
+
+[[message.signal]]
+name = "SystemReady"
+start_bit = 4
+length = 1
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+confidence = "probable"
+evidence = """
+Bit 0x08 of byte 0. Clear for the first seconds after the pack is connected,
+then set, and it never clears again while power is held.
+
+Four pack removals in the 7 September battery-removal session, four identical
+boots. The heartbeat itself restarts +0.10 to +0.12 s after power returns,
+already carrying 0x00; the bit sets at +2.01, +2.10, +2.22 and +1.70 s. Every
+one of the 711 frames recorded before the first removal has it set, as does
+every frame of the three earlier sessions and the 4 September corpus.
+
+Reading it as "initialised" is an inference from the timing, not a
+measurement, which is why this is "probable". Two facts support it: the delay
+is close to the 2.1-2.6 s that 04FF3604 takes to start after an UNLOCK, and
+04FF3400 issues its first tick 10 s after the same instant.
+
+WHAT WOULD DISPROVE IT: a recording where the bit clears without a power
+interruption -- during a ride, a fault, or a lock/unlock. That would make it a
+status bit rather than a boot flag. Nothing in the corpus shows this, but the
+corpus contains only four boots.
 """

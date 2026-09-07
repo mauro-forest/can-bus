@@ -185,6 +185,81 @@ def test_marks_feed_the_experiment_machinery():
     assert windows[0].duration == 20.0
 
 
+def test_gtecc_commands_become_marks_carrying_their_argument():
+    """A GTECC ack names no command, so the argument comes from the sent line.
+
+    Verbatim from the 7 September max-speed session. The `18` exists only in
+    the outgoing `AT+GTECC=`; the ack echoes the serial number A73A and
+    nothing else. Two GTECCs with different arguments are different stimuli,
+    so a mark labelled just `GTECC` would be useless for windowing.
+    """
+    serial = pd.DataFrame(
+        [
+            {"timestamp": 1788800819.468858, "text": "AT+GTECC=*,,18,,,,,,,,A73A$"},
+            {
+                "timestamp": 1788800819.471943,
+                "text": "+ACK:GTECC,EF8051,865969076362128,HumanForest,,A73A,"
+                "20260907170657,A73A$",
+            },
+            {"timestamp": 1788800835.473712, "text": "AT+GTECC=*,,25,,,,,,,,A73B$"},
+            {
+                "timestamp": 1788800835.477701,
+                "text": "+ACK:GTECC,EF8051,865969076362128,HumanForest,,A73B,"
+                "20260907170713,A73B$",
+            },
+        ]
+    )
+    marks = queclink.as_marks(serial)
+    assert list(marks["label"]) == ["GTECC:18", "GTECC:25"]
+    # The mark is stamped from the ack, not the sent line: the ack is the
+    # device saying it acted, and it shares the CAN log's clock.
+    assert marks.iloc[0]["timestamp"] == 1788800819.471943
+
+
+def test_gtecc_ack_without_its_sent_line_still_marks():
+    """A session that recorded only the ack must not silently drop it."""
+    serial = pd.DataFrame(
+        [
+            {
+                "timestamp": 1788800819.471943,
+                "text": "+ACK:GTECC,EF8051,865969076362128,HumanForest,,A73A,"
+                "20260907170657,A73A$",
+            }
+        ]
+    )
+    assert list(queclink.as_marks(serial)["label"]) == ["GTECC"]
+
+
+def test_gtrto_and_gtecc_marks_interleave_by_time():
+    """Both command families land in one marks table, in clock order."""
+    serial = pd.DataFrame(
+        [
+            {"timestamp": 1788800835.473712, "text": "AT+GTECC=*,,25,,,,,,,,A73B$"},
+            {
+                "timestamp": 1788800835.477701,
+                "text": "+ACK:GTECC,EF8051,865969076362128,HumanForest,,A73B,"
+                "20260907170713,A73B$",
+            },
+            {"timestamp": 1788785214.368, "text": GTRTO_HLON},
+        ]
+    )
+    assert list(queclink.as_marks(serial)["label"]) == ["HLON", "GTECC:25"]
+
+
+def test_sent_commands_pairs_argument_to_serial_number():
+    serial = pd.DataFrame(
+        [
+            {"timestamp": 1.0, "text": "AT+GTECC=*,,18,,,,,,,,A73A$"},
+            {"timestamp": 2.0, "text": "AT+GTRTO=*,,25,,,,,,,,A732$"},
+            {"timestamp": 3.0, "text": GTFRI},  # not a sent command
+        ]
+    )
+    assert queclink.sent_commands(serial) == {
+        "A73A": ("GTECC", "18"),
+        "A732": ("GTRTO", "25"),
+    }
+
+
 def test_as_marks_with_no_commands():
     assert queclink.as_marks(pd.DataFrame()).empty
 
