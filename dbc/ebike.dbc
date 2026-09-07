@@ -1,0 +1,85 @@
+VERSION ""
+
+
+NS_ : 
+	NS_DESC_
+	CM_
+	BA_DEF_
+	BA_
+	VAL_
+	CAT_DEF_
+	CAT_
+	FILTER
+	BA_DEF_DEF_
+	EV_DATA_
+	ENVVAR_DATA_
+	SGTYPE_
+	SGTYPE_VAL_
+	BA_DEF_SGTYPE_
+	BA_SGTYPE_
+	SIG_TYPE_REF_
+	VAL_TABLE_
+	SIG_GROUP_
+	SIG_VALTYPE_
+	SIGTYPE_VALTYPE_
+	BO_TX_BU_
+	BA_DEF_REL_
+	BA_REL_
+	BA_DEF_DEF_REL_
+	BU_SG_REL_
+	BU_EV_REL_
+	BU_BO_REL_
+	SG_MUL_VAL_
+
+BS_:
+
+BU_: 
+
+
+BO_ 2214531072 Heartbeat_1000: 8 Vector__XXX
+
+BO_ 2231317504 Uptime_3400: 8 Vector__XXX
+ SG_ Uptime : 23|16@0+ (10,0) [0|0] "s" Vector__XXX
+
+
+
+
+CM_ BO_ 2214531072 "[probable] The dominant message on the bus: 7243 of 7588 legacy frames, every 105 ms, and
+the payload 0840112200000001 never varies once across the whole corpus. A fixed
+payload at a fixed rate is a liveness announcement, not data. Node field
+10->00 appears nowhere else, so whichever component sends this talks to nothing.
+No signals defined: there is nothing here that varies to define one from.";
+CM_ BO_ 2231317504 "[probable] The only message in the legacy corpus that carries changing data: 77 frames,
+77 distinct payloads, on a 10.00 s period. Bytes 0-1 and 4-7 are always zero;
+all variation is in bytes 2-3, which rise monotonically and never repeat.";
+CM_ SG_ 2231317504 Uptime "[probable] CONFIRMED -- the increment rate. Across all 12 legacy logs the change in this
+field between consecutive frames equals the elapsed wall-clock time divided by
+10, exactly, at every one of the 76 steps. That holds across the gaps between
+separate recordings too, including a 2520 s gap that advanced the field by 252.
+So the field counts in 10 s units and kept running while nothing was recording,
+which also means the bike stayed powered across the whole 4 September session.
+Wall-clock time is the ground truth here, so the scale needs no further test.
+
+PROBABLE -- the field width. Bytes 2-3 taken as one 16-bit big-endian value
+range 2306-2878 over the corpus. discover.candidate_fields() reports only the
+low 10 bits as active, but the 6 bits above them hold a constant 0b000010,
+not zero: padding would be zero, so those bits are most likely part of the
+value rather than outside it. A 10-bit field would also wrap every 2.8 h,
+against 7.6 d for 16 bits. Not yet decisive.
+
+UNKNOWN -- the epoch. 16 bits puts the first recorded frame at 23,060 s
+(6 h 24 m) of uptime. Whether that is since the battery was connected, since
+the ECU booted, or since something else is untested.
+
+NEXT TEST: power-cycle the bike and record immediately. If this field restarts
+near zero it is an uptime counter; if it carries on it is an odometer or a
+persistent accumulator, and the 10 s cadence would then be a coincidence of a
+stationary bike.";
+BA_DEF_ BO_  "GenMsgCycleTime" INT 0 65535;
+BA_DEF_DEF_  "GenMsgCycleTime" 0;
+BA_ "GenMsgCycleTime" BO_ 2214531072 105;
+BA_ "GenMsgCycleTime" BO_ 2231317504 10000;
+
+
+
+

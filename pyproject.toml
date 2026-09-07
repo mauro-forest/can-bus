@@ -1,0 +1,32 @@
+[project]
+name = "can-bus"
+version = "0.1.0"
+description = "Capture and reverse-engineer the CAN bus and IoT serial console of a Forest ebike"
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+# Runs on the Raspberry Pi. Keep this list tiny -- the Pi should never need pandas.
+capture = ["pyserial>=3.5"]
+# Runs on the laptop.
+analysis = [
+    "pandas>=2.2",
+    "cantools>=39.4",
+    "python-can>=4.3",
+    "plotly>=5.22",
+    "jupyterlab>=4.2",
+]
+dev = ["pytest>=8.2"]
+
+[tool.uv]
+# Not an installable package: both the Pi and the laptop run it in place with
+# `uv run python -m ...`. This keeps `bikelog` deployable on its own, without
+# `bikecan` having to be present for a build to succeed.
+package = false
+default-groups = ["capture", "analysis", "dev"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The project is not installed (see [tool.uv] package = false), so put the repo
+# root on sys.path for `bikelog` and `bikecan` imports.
+pythonpath = ["."]

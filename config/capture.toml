@@ -1,0 +1,19 @@
+# Capture configuration, read by the `bikelog` CLI on the Raspberry Pi.
+
+[can]
+interface = "can0"
+# The ebike bus bitrate. `bikelog` reads the interface's actual bitrate back
+# after bringing it up, and warns when it disagrees with this value.
+bitrate = 250000
+
+[serial]
+# The IoT module's debug console. Fill in the real device and baud rate.
+port = "/dev/ttyUSB0"
+baudrate = 115200
+# Seconds to wait on a read before looping; only affects shutdown latency.
+timeout = 1.0
+
+[session]
+# Where recordings are written on the Pi. Deliberately outside the deployed
+# code directory so `deploy.sh --delete` can never touch a recording.
+dir = "~/bikelog-sessions"
