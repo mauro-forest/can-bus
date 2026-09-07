@@ -14,12 +14,16 @@ bytes, `PP TT AA BB`:
     02 18 16 08       0x02181608   same TT and AA, different BB
     05 12 46 09       0x05124609   the reply to 0x02294609
 
-  PP  a priority: only 0x02-0x08 ever seen, low values on frequent traffic,
-      consistent with a CAN arbitration priority in the top bits.
-  TT  a message or command type: 0xFF on the broadcast-looking heartbeats,
-      small values (0x12, 0x18, 0x20, 0x29, 0x40, 0x47) on the rest.
-  AA  a node field. Values seen: 0x10 0x16 0x26 0x34 0x36 0x46 0x76.
-  BB  a second node field. Values seen: 0x00 0x02 0x03 0x06 0x08 0x09.
+  PP  a priority: values 0x02-0x1F, which is exactly the five bits available
+      above the low 24, with low values on the most frequent traffic.
+  TT  a message or command type. 0xFF appears only on periodic status messages
+      and never on a command, so it probably means "unsolicited report".
+  AA  a subsystem field. Confirmed: 0x36 is the headlight, 0x16 the rear light,
+      0x46 the BMS, 0x64 the HubLock (see dbc/nodes.md for the evidence).
+  BB  an index within that subsystem -- NOT simply a peer address. It is echoed
+      exactly from request to reply, but for the BMS (AA=0x46) it runs 0x00-0x10
+      selecting which block of cell data is reported, while for both confirmed
+      lamps it is 0x06 with AA doing the distinguishing.
 
 WHAT MAKES IT TESTABLE
 
@@ -29,9 +33,14 @@ protocol between one fixed pair of nodes looks like. If AA and BB really are
 node addresses, every frame can be attributed to two physical components, and
 the search space for every other question collapses.
 
-A competing reading is that AA is itself two nibbles -- note 0x16/0x06 and
-0x36/0x03 and 0x46/0x09 pair up suspiciously -- so `nibbles` exposes that too.
-Both survive until a session disproves one.
+A competing reading is that AA is itself two nibbles. It looked promising while
+the low nibble of AA was 6 for all three confirmed components (0x36 headlight,
+0x16 rear light, 0x46 BMS) -- but the HubLock then turned up at 0x64, low
+nibble 4, so the pattern was a coincidence of the first three. `nibbles` still
+exposes the reading; the evidence for it is now weak.
+
+The open question that would settle it is 0x04FF3604: a 30 ms message at the
+headlight address, far too fast for a lamp.
 """
 
 from __future__ import annotations

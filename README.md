@@ -130,30 +130,82 @@ Work the notebooks in order:
 
 ## What is known so far
 
-From the 12 unique legacy recordings (7,588 frames, 13 identifiers, 5,733 s of
-coverage on 4 September 2026 — recorded before this tooling existed, so no marks
-and no metadata):
+Four components are **confirmed**, each tied to a commanded action, a measured
+value, or the component's traffic vanishing when it is unplugged — never to a
+plausible-looking payload:
 
-- **`04FF3400` carries a 10-second uptime counter.** Bytes 2–3, big endian.
-  Across all 12 logs the field's change between consecutive frames equals the
-  elapsed wall-clock time divided by 10 — exactly, at all 76 steps, including
-  across a 2520 s gap that advanced it by 252. The bike therefore stayed powered
-  across the whole session. Wall-clock time is the ground truth, so the scale
-  needs no further test; the field *width* and the epoch are still open.
-- **`03FF1000` is a heartbeat.** 7,243 of 7,588 frames, every 105 ms, payload
-  `0840112200000001`, which never varies once. A fixed payload at a fixed rate
-  carries no information.
-- **There is a request/response protocol.** A zero-length `02294609` is answered
-  ~1 ms later by `05124609#0100037003E800`: same node pair, different message
-  type.
-- **No component has been identified yet.** Every entry in `dbc/nodes.md` rests
-  on traffic patterns alone. Nothing has been tied to a physical part by making
-  that part do something, because no session has been recorded with marks.
+| Component | Identifier | Signal | Evidence |
+|---|---|---|---|
+| **Headlight** | `02203606` | byte 1 = on/off | `HLON` then `HLOFF` were followed by byte 1 changing after 0.77 s and 0.33 s. Nothing else on the bus changed. |
+| **Rear light** | `02181606` | byte 4 = on/off | `RLONEN` then `RLOFF`, followed by byte 4 changing after 0.76 s and 0.40 s. |
+| **BMS** | `05FF4602`–`05FF4605` | 13 cell voltages, little-endian uint16 mV | The tracker relays these payloads **verbatim** in `+RESP:GTBMI`. 13 cells summing to 53.622 V against the 53.696 V that `+RESP:GTFRI` reported for the pack. |
+| **HubLock** | `13B76400` | byte 0 = 1 unlocked, 0 locked | **Disconnection.** With the HubLock disabled this was the only identifier to vanish — 95 became 94, nothing replaced it, and both lamps kept toggling. Unlock takes 2.1–2.6 s, lock 0.3–0.6 s. |
 
-The identifier structure hypothesis — `PP TT AA BB`, priority / message type /
-two node fields — is set out in `bikecan/ids.py` with the evidence for and
-against. Confirming the node fields is the highest-value next step: it would
-attribute every frame to two physical components at once.
+Also confirmed: **`04FF3400` is a 10-second uptime counter** (bytes 2–3, big
+endian). Its delta equalled elapsed wall-clock time over 10 at every step in
+both sessions, and it *reset* between them — so it is uptime, not an odometer.
+The heartbeat `03FF1000` carries no information: a fixed payload at a fixed rate.
+
+`dbc/ebike.dbc` now decodes 94.7% of frames in the latest session.
+
+### How this was found, and how to find the rest
+
+Three techniques, strongest first.
+
+**Disconnect the component** and diff the identifier sets. This settled the
+HubLock: exactly one identifier disappeared and nothing replaced it. Bench only.
+
+**Compare states, not events** — `experiment.compare_states()`. Build a state
+timeline from the serial reports, then find bytes whose value sets are
+*disjoint* between states. Scoring against commands instead does not work: a
+repeated `UNLOCK` on an already-unlocked bike produces no frame, so one session's
+six commands yielded two transitions and the correct answer ranked 3rd of 8.
+Watch for the one guaranteed false positive — a monotonic counter is disjoint
+across any two intervals, so `04FF3400`'s uptime byte surfaces every time.
+
+**Diff a tight event window** when a command has an isolated effect, which is
+how both lamps were found.
+
+All three rely on the serial console. Not on staring at payloads. The IoT serial console speaks the **Queclink @Track
+protocol** (`bikecan/queclink.py`, spec in `reference/`), and it gives two
+things nothing else does:
+
+- **`+ACK:GTRTO` logs every remote command by name** — `HLON`, `RLOFF`,
+  `UNLOCK` — timestamped on the same clock as the CAN log. `queclink.as_marks`
+  turns those into a marks table, so a session nobody annotated still yields
+  stimulus windows. This is what identified both lamps.
+- **`+RESP:GTFRI` carries measured ground truth**: pack voltage, speed,
+  mileage, light states, pack current, cell temperatures. Signal fitting had
+  none of this before. Note that `altitude` is metres above sea level — a
+  reading of 12.4 looks convincingly like a battery voltage and is not one.
+
+So the cheapest way to identify a component is to record a session and fire
+remote commands at the bike. Every command is a free, precisely-timed stimulus.
+
+### What is still open
+
+- **`04FF3604`**: 30 ms period, the fastest message on the bus, sitting at the
+  headlight's address. Far too fast for a lamp. Resolving it probably resolves
+  what the identifier's node fields actually mean.
+- **The bus sleeps.** An idle locked bike shows 5 identifiers; unlocking wakes
+  it to 98. Any inventory taken from a locked bike is a small fraction of what
+  exists.
+- **Nothing has been ridden.** Every session so far has been stationary — speed
+  0.0 and one fixed GPS position. Speed, torque and motor current cannot be
+  found in data where they are all zero, and they are the signals most worth
+  having.
+- **Two undocumented ECU faults are active.** The error code is
+  `0210000000000000` in every session — bits 52 and 57, outside the 0–35 range
+  the protocol document defines. Unchanged by disabling the HubLock, so not a
+  lock fault.
+- **Don't trust the console's state fields as ground truth for the bus.** With
+  the HubLock physically absent, `GTFRI` still reported `ECU Lock State`
+  flipping 0/1. It reflects what the IoT module believes, not what the hardware
+  did.
+
+The identifier structure — `PP TT AA BB` — is set out in `bikecan/ids.py`, with
+the confirmed component addresses and the evidence that `BB` is an index rather
+than simply a peer address. `dbc/nodes.md` holds the full mapping.
 
 ## Recording what you find
 

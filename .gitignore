@@ -4,6 +4,7 @@
 # Pi connection details are per-machine.
 /tools/pi.env
 
+.DS_Store
 __pycache__/
 *.py[cod]
 .venv/

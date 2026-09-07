@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 
 DEFAULT_WINDOW_S = 5.0
@@ -134,3 +135,102 @@ def report(can: pd.DataFrame, marks: pd.DataFrame) -> str:
             )
         lines.append("")
     return "\n".join(lines)
+
+# -- comparing states ----------------------------------------------------
+
+MAX_PAYLOAD = 8
+
+
+def compare_states(can: pd.DataFrame, intervals: list[tuple[float, float, str]]) -> pd.DataFrame:
+    """Find bytes whose value is a consistent function of a labelled state.
+
+    `intervals` is a list of (start, end, state_label). Returns one row per
+    (identifier, byte) whose observed value sets are **disjoint** between
+    states, ranked by how many distinct intervals support it.
+
+    This is stronger than diffing event windows, and it is what identified the
+    lock. The reason is that a command only changes anything when the state is
+    not already satisfied: one session issued six UNLOCK commands and produced
+    two unlock transitions, so scoring bytes against commands ranked the right
+    answer 3rd of 8 and buried it under high-churn bytes that matched by chance.
+    Comparing the states themselves has no such problem.
+
+    Requiring at least two intervals per state matters: with one interval each,
+    any byte that changed once for any reason looks like a perfect predictor.
+
+    One false positive is unavoidable and worth recognising on sight: a
+    monotonic counter has disjoint values across any two time intervals, so
+    04FF3400's uptime byte appears every time and is never the answer.
+    """
+    if not len(can) or not intervals:
+        return pd.DataFrame()
+
+    def state_of(when: float) -> str | None:
+        for start, end, label in intervals:
+            if start <= when < end:
+                return label
+        return None
+
+    def interval_of(when: float) -> int:
+        for index, (start, end, _label) in enumerate(intervals):
+            if start <= when < end:
+                return index
+        return -1
+
+    frames = can.sort_values("timestamp")
+    states = [state_of(when) for when in frames["timestamp"]]
+    which = [interval_of(when) for when in frames["timestamp"]]
+    frames = frames.assign(_state=states, _interval=which)
+    frames = frames[frames["_state"].notna()]
+
+    rows = []
+    for id_hex, group in frames.groupby("id_hex", sort=False):
+        payloads = np.array(
+            [list(bytes(p).ljust(MAX_PAYLOAD, b"\x00")) for p in group["data"]],
+            dtype=int,
+        )
+        labels = group["_state"].to_numpy()
+        intervals_seen = group["_interval"].to_numpy()
+
+        support = {
+            label: len(set(intervals_seen[labels == label].tolist()))
+            for label in set(labels.tolist())
+        }
+        if len(support) < 2 or min(support.values()) < 2:
+            continue
+
+        for index in range(MAX_PAYLOAD):
+            column = payloads[:, index]
+            by_state = {
+                label: set(column[labels == label].tolist()) for label in support
+            }
+            values = list(by_state.values())
+            disjoint = all(
+                not (values[a] & values[b])
+                for a in range(len(values))
+                for b in range(a + 1, len(values))
+            )
+            if not disjoint or any(not v for v in values):
+                continue
+
+            rows.append(
+                {
+                    "id_hex": id_hex,
+                    "byte": index,
+                    "frames": len(group),
+                    "min_interval_support": min(support.values()),
+                    "distinct_values": int(len(set(column.tolist()))),
+                    # A counter takes a new value nearly every frame; a state
+                    # flag takes one value per state.
+                    "looks_like_counter": len(set(column.tolist())) > 2 * len(support),
+                    **{f"values_{label}": sorted(by_state[label])[:8] for label in support},
+                }
+            )
+
+    result = pd.DataFrame(rows)
+    if not len(result):
+        return result
+    return result.sort_values(
+        ["looks_like_counter", "min_interval_support", "frames"],
+        ascending=[True, False, False],
+    ).reset_index(drop=True)

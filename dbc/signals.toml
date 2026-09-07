@@ -3,32 +3,436 @@
 # This file is the record; dbc/ebike.dbc is generated from it by
 # `uv run python -m bikecan.dbc`. Edit this, never the DBC.
 #
-# start_bit counts MSB-first from byte 0 -- bit 0 is the top bit of byte 0 --
-# matching what discover.bit_detail() and discover.candidate_fields() report.
+# BIT NUMBERING -- read this before adding a signal.
+#   big_endian:    start_bit counts MSB-first from byte 0, so bit 0 is the top
+#                  bit of byte 0. This matches discover.bit_detail() and
+#                  discover.candidate_fields().
+#   little_endian: start_bit is the DBC position of the signal's LEAST
+#                  significant bit, which for a byte-aligned value is
+#                  8 * byte_index.
+# The two conventions differ because DBC itself defines them differently.
+# tests/test_dbc.py decodes a real payload of each kind to catch a mistake.
 #
 # confidence:
 #   hypothesis  consistent with the recordings, not yet tested against a stimulus
 #   probable    a stimulus experiment supports it, no ground truth measurement
-#   confirmed   fitted against a measured value (wall clock, multimeter, wheel
-#               rotations, ...)
+#   confirmed   tied to a measured value or a commanded action
 #
-# Everything below comes from the 12 unique legacy recordings (7,588 frames,
-# 13 identifiers, 95 minutes of wall clock spread over 5,733 s of coverage).
+# GROUND TRUTH comes from the IoT serial console, which speaks the Queclink
+# @Track protocol (see bikecan/queclink.py and reference/). Two things there
+# are worth more than any amount of staring at payloads:
+#   * +ACK:GTRTO logs each remote command by name (HLON, HLOFF, RLONEN, RLOFF,
+#     UNLOCK, LOCK) with a timestamp on the same clock as the CAN log, so a
+#     commanded action can be tied to the frame that carries it.
+#   * +RESP:GTBMI relays BMS frames into the report VERBATIM -- the same bytes
+#     appear in the CAN payload and in the report -- and +RESP:GTFRI carries
+#     the pack voltage, so the BMS frames decode without guesswork.
+
+# ---------------------------------------------------------------------------
+# Confirmed by commanded action
+# ---------------------------------------------------------------------------
 
 [[message]]
-id = 0x03FF1000
-name = "Heartbeat_1000"
+id = 0x02203606
+name = "HeadLight_3606"
 length = 8
 extended = true
-cycle_time_ms = 105
+confidence = "confirmed"
+comment = """
+The headlight. Identified by remote command: the console logged HLON at
+1788785214.368 and HLOFF at 1788785234.208, and this message changed 0.77 s and
+0.33 s later respectively. Nothing else on the bus changed in either window
+except the uptime counter ticking.
+"""
+
+[[message.signal]]
+name = "HeadLightOn"
+start_bit = 8
+length = 8
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+confidence = "confirmed"
+evidence = """
+Byte 1. Goes to 1 within 0.77 s of the HLON command and to 0 within 0.33 s of
+HLOFF, then to 1 again 2.0 s after UNLOCK and to 0 1.3 s after LOCK -- so
+unlocking the bike switches the headlight on, which is why the periodic GTFRI
+report still showed head_light_status=1 after HLOFF. Cross-checks against
+<ECU Info> field 5 (Head Light Status) in the same session.
+"""
+
+[[message.signal]]
+name = "HeadLightSource"
+start_bit = 0
+length = 8
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+confidence = "hypothesis"
+evidence = """
+Byte 0 is 0x02 when the change came from an explicit HLON/HLOFF command and
+0x01 when it came from the unlock sequence, so it may say what asked for the
+change. Two observations of each: nowhere near enough.
+"""
+
+[[message]]
+id = 0x02181606
+name = "RearLight_1606"
+length = 8
+extended = true
+confidence = "confirmed"
+comment = """
+The rear light. Same method as the headlight: RLONEN at 1788785392.364 and
+RLOFF at 1788785412.125, with this message changing 0.76 s and 0.40 s later,
+and nothing else changing in either window.
+"""
+
+[[message.signal]]
+name = "RearLightOn"
+start_bit = 32
+length = 8
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+confidence = "confirmed"
+evidence = """
+Byte 4. Goes to 1 within 0.76 s of RLONEN and to 0 within 0.40 s of RLOFF, and
+also tracks UNLOCK (0.28 s) and LOCK (0.52 s). Cross-checks against <ECU Info>
+field 6 (Rear Light Status).
+"""
+
+[[message.signal]]
+name = "RearLightUnknownByte2"
+start_bit = 16
+length = 8
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+confidence = "hypothesis"
+evidence = """
+Byte 2 is 0x19 (25) while the rear light is on because of an unlock, but 0x00
+when it is on because of an RLONEN command. So it is not the light state. A
+brightness or mode, possibly. Untested.
+"""
+
+[[message]]
+id = 0x13B76400
+name = "Lock_6400"
+length = 1
+extended = true
+cycle_time_ms = 280
+confidence = "confirmed"
+comment = """
+The lock (immobiliser) reporting its state. A single-byte message, and the only
+one on the bus with priority 0x13.
+
+Identified across two independent sessions by driving UNLOCK and LOCK remotely
+and watching which byte tracked the resulting state. Method: build the lock
+state timeline from the +RESP:GTMLS reports, then look for bytes whose value
+sets are disjoint between locked and unlocked intervals. Exactly one byte
+qualified across 2 locked and 2 unlocked intervals.
+
+CONFIRMED BY DISCONNECTION: a third session was recorded with the HubLock
+disabled. This identifier went from 139 frames to zero, and it was the ONLY
+identifier to disappear -- 95 identifiers became 94, with none appearing in its
+place. Both lamps still toggled normally in that session, so the bus was
+healthy and the remote commands were still being processed. The component that
+sends this is therefore the HubLock, and AA=0x64 is its address.
+
+NOT the battery lock. <ECU Info> field 13 (Battery-Lock State) stayed 0 through
+all three sessions while this byte flipped.
+"""
+
+[[message.signal]]
+name = "Unlocked"
+start_bit = 0
+length = 8
+byte_order = "big_endian"
+signed = false
+scale = 1
+offset = 0
+confidence = "confirmed"
+evidence = """
+Byte 0. 1 = unlocked, 0 = locked -- note this is the inverse of GTFRI's
+ECU Lock State field, so it reads as an "unlocked" flag. Named for what the
+raw value means rather than inverting it here.
+
+Six transitions across two sessions, every one following its command:
+  UNLOCK -> 1 after 2.12 s, 2.55 s, 2.17 s
+  LOCK   -> 0 after 0.32 s, 0.46 s, 0.58 s
+The asymmetry is consistent and worth keeping: unlocking takes about four times
+as long as locking, which is what a motorised latch does and is not what a
+command echo would do.
+
+Repeated UNLOCK commands on an already-unlocked bike produce no transition, so
+this byte reports actual state and not command receipt. That is why session 2's
+six UNLOCK commands yielded only two unlock transitions.
+
+DO NOT use GTFRI's ECU Lock State as a substitute for this signal. With the
+HubLock disabled and no 13B76400 on the bus at all, that field still reported
+lock_state flipping 0 and 1, so it tracks what the IoT module believes rather
+than what the lock did.
+"""
+
+# ---------------------------------------------------------------------------
+# Confirmed against measured values relayed by the tracker
+# ---------------------------------------------------------------------------
+
+[[message]]
+id = 0x05FF4602
+name = "BmsCellVoltages_1_4"
+length = 8
+extended = true
+cycle_time_ms = 1044
+confidence = "confirmed"
+comment = """
+BMS cell voltages, cells 1-4. Confirmed without guesswork: the +RESP:GTBMI
+report relays this frame's payload verbatim -- the identical byte string
+1410191019101910 appears both in the CAN payload and in the report -- and
+GTBMI states a cell count of 13, which is exactly what 05FF4602 through
+05FF4605 supply (4+4+4+1). The 13 cells sum to 53.622 V against the 53.696 V
+that GTFRI reported for the pack at the same moment, a 0.14 % difference.
+"""
+
+[[message.signal]]
+name = "Cell1"
+start_bit = 0
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "Little-endian uint16 in mV: bytes 14 10 read as 0x1014 = 4116 mV."
+
+[[message.signal]]
+name = "Cell2"
+start_bit = 16
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "Little-endian uint16 in mV."
+
+[[message.signal]]
+name = "Cell3"
+start_bit = 32
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "Little-endian uint16 in mV."
+
+[[message.signal]]
+name = "Cell4"
+start_bit = 48
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "Little-endian uint16 in mV."
+
+[[message]]
+id = 0x05FF4603
+name = "BmsCellVoltages_5_8"
+length = 8
+extended = true
+cycle_time_ms = 1044
+confidence = "confirmed"
+comment = "BMS cell voltages, cells 5-8. Relayed verbatim in +RESP:GTBMI."
+
+[[message.signal]]
+name = "Cell5"
+start_bit = 0
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "Little-endian uint16 in mV."
+
+[[message.signal]]
+name = "Cell6"
+start_bit = 16
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "Little-endian uint16 in mV."
+
+[[message.signal]]
+name = "Cell7"
+start_bit = 32
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "Little-endian uint16 in mV."
+
+[[message.signal]]
+name = "Cell8"
+start_bit = 48
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "Little-endian uint16 in mV."
+
+[[message]]
+id = 0x05FF4604
+name = "BmsCellVoltages_9_12"
+length = 8
+extended = true
+cycle_time_ms = 1044
+confidence = "confirmed"
+comment = "BMS cell voltages, cells 9-12. Relayed verbatim in +RESP:GTBMI."
+
+[[message.signal]]
+name = "Cell9"
+start_bit = 0
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "Little-endian uint16 in mV."
+
+[[message.signal]]
+name = "Cell10"
+start_bit = 16
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "Little-endian uint16 in mV."
+
+[[message.signal]]
+name = "Cell11"
+start_bit = 32
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "Little-endian uint16 in mV."
+
+[[message.signal]]
+name = "Cell12"
+start_bit = 48
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "Little-endian uint16 in mV."
+
+[[message]]
+id = 0x05FF4605
+name = "BmsCellVoltage_13"
+length = 8
+extended = true
+cycle_time_ms = 1044
+confidence = "confirmed"
+comment = """
+BMS cell voltage, cell 13, then padding. This pack has 13 cells, so the last
+frame of the series carries one value and six zero bytes -- which is how the
+cell count was established.
+"""
+
+[[message.signal]]
+name = "Cell13"
+start_bit = 0
+length = 16
+byte_order = "little_endian"
+unit = "mV"
+confidence = "confirmed"
+evidence = "Little-endian uint16 in mV. Bytes 2-7 are always zero: only 13 cells."
+
+[[message]]
+id = 0x05FF4606
+name = "BmsTemperatures_A"
+length = 3
+extended = true
+cycle_time_ms = 1044
 confidence = "probable"
 comment = """
-The dominant message on the bus: 7243 of 7588 legacy frames, every 105 ms, and
-the payload 0840112200000001 never varies once across the whole corpus. A fixed
-payload at a fixed rate is a liveness announcement, not data. Node field
-10->00 appears nowhere else, so whichever component sends this talks to nothing.
-No signals defined: there is nothing here that varies to define one from.
+BMS temperatures. Payload 1C1C1C reads as 28, 28, 28 which is a plausible cell
+temperature in degrees Celsius, and the same byte string is relayed in
++RESP:GTBMI immediately after the cell voltage frames. Which physical sensor
+each byte is has not been established: <ECU Info> field 12 lists cell maximum,
+cell minimum, MOS and "other" temperatures, and there are more of those than
+there are bytes here.
 """
+
+[[message.signal]]
+name = "Temp1"
+start_bit = 0
+length = 8
+byte_order = "big_endian"
+unit = "degC"
+confidence = "probable"
+evidence = "0x1C = 28 degC. Sensor identity unknown; the scale may also have an offset."
+
+[[message.signal]]
+name = "Temp2"
+start_bit = 8
+length = 8
+byte_order = "big_endian"
+unit = "degC"
+confidence = "probable"
+evidence = "0x1C = 28 degC. Sensor identity unknown."
+
+[[message.signal]]
+name = "Temp3"
+start_bit = 16
+length = 8
+byte_order = "big_endian"
+unit = "degC"
+confidence = "probable"
+evidence = "0x1C = 28 degC. Sensor identity unknown."
+
+[[message]]
+id = 0x05FF4607
+name = "BmsTemperatures_B"
+length = 3
+extended = true
+cycle_time_ms = 1044
+confidence = "probable"
+comment = """
+More BMS temperatures: 1D1B1C reads as 29, 27, 28 degC, and is likewise
+relayed verbatim in +RESP:GTBMI. The spread across the two frames is 27-29 degC
+on a stationary bike at room temperature, which is what makes the reading
+plausible.
+"""
+
+[[message.signal]]
+name = "Temp4"
+start_bit = 0
+length = 8
+byte_order = "big_endian"
+unit = "degC"
+confidence = "probable"
+evidence = "0x1D = 29 degC. Sensor identity unknown."
+
+[[message.signal]]
+name = "Temp5"
+start_bit = 8
+length = 8
+byte_order = "big_endian"
+unit = "degC"
+confidence = "probable"
+evidence = "0x1B = 27 degC. Sensor identity unknown."
+
+[[message.signal]]
+name = "Temp6"
+start_bit = 16
+length = 8
+byte_order = "big_endian"
+unit = "degC"
+confidence = "probable"
+evidence = "0x1C = 28 degC. Sensor identity unknown."
+
+# ---------------------------------------------------------------------------
+# Confirmed against the wall clock
+# ---------------------------------------------------------------------------
 
 [[message]]
 id = 0x04FF3400
@@ -36,11 +440,10 @@ name = "Uptime_3400"
 length = 8
 extended = true
 cycle_time_ms = 10000
-confidence = "probable"
+confidence = "confirmed"
 comment = """
-The only message in the legacy corpus that carries changing data: 77 frames,
-77 distinct payloads, on a 10.00 s period. Bytes 0-1 and 4-7 are always zero;
-all variation is in bytes 2-3, which rise monotonically and never repeat.
+A 10-second uptime tick. Bytes 0-1 and 4-7 are always zero; bytes 2-3 rise
+monotonically and never repeat, so every frame of this message is unique.
 """
 
 [[message.signal]]
@@ -52,29 +455,46 @@ signed = false
 scale = 10
 offset = 0
 unit = "s"
-confidence = "probable"
+confidence = "confirmed"
 evidence = """
-CONFIRMED -- the increment rate. Across all 12 legacy logs the change in this
-field between consecutive frames equals the elapsed wall-clock time divided by
-10, exactly, at every one of the 76 steps. That holds across the gaps between
-separate recordings too, including a 2520 s gap that advanced the field by 252.
-So the field counts in 10 s units and kept running while nothing was recording,
-which also means the bike stayed powered across the whole 4 September session.
-Wall-clock time is the ground truth here, so the scale needs no further test.
+CONFIRMED -- the rate. In the 4 September corpus the field's change between
+consecutive frames equalled the elapsed wall-clock time divided by 10, exactly,
+at all 76 steps, including across a 2520 s gap that advanced it by 252. The
+7 September session reproduced this independently: 706 steps, every delta
+exactly 1, against 7060 s elapsed. Wall-clock time is the ground truth, so the
+scale needs no further test.
 
-PROBABLE -- the field width. Bytes 2-3 taken as one 16-bit big-endian value
-range 2306-2878 over the corpus. discover.candidate_fields() reports only the
-low 10 bits as active, but the 6 bits above them hold a constant 0b000010,
-not zero: padding would be zero, so those bits are most likely part of the
-value rather than outside it. A 10-bit field would also wrap every 2.8 h,
-against 7.6 d for 16 bits. Not yet decisive.
+CONFIRMED -- that it is uptime, not an odometer. The field read 2878 when the
+4 September session ended and 509 when the 7 September session began, so it
+resets. A power-cycle test was recorded in signals.toml as the way to tell
+uptime from an odometer, and this is that test passing.
 
-UNKNOWN -- the epoch. 16 bits puts the first recorded frame at 23,060 s
-(6 h 24 m) of uptime. Whether that is since the battery was connected, since
-the ECU booted, or since something else is untested.
+CONFIRMED -- wider than 10 bits. discover.candidate_fields() reports only the
+low 10 bits as active within one session, but the 7 September session ran the
+field from 509 to 1215, straight past the 1023 where a 10-bit field would wrap,
+monotonically and with every delta 1.
 
-NEXT TEST: power-cycle the bike and record immediately. If this field restarts
-near zero it is an uptime counter; if it carries on it is an odometer or a
-persistent accumulator, and the 10 s cadence would then be a coincidence of a
-stationary bike.
+UNKNOWN -- whether it is 16 or 32 bits. Bytes 0-1 are always zero, so they
+could be the high half of a 32-bit value. Separating the two needs more than
+7.6 days of continuous uptime, which is when a 16-bit field would wrap.
+
+UNKNOWN -- which component sends it, and what event starts the count.
+"""
+
+# ---------------------------------------------------------------------------
+# Not decoded, but worth writing down
+# ---------------------------------------------------------------------------
+
+[[message]]
+id = 0x03FF1000
+name = "Heartbeat_1000"
+length = 8
+extended = true
+cycle_time_ms = 105
+confidence = "probable"
+comment = """
+A heartbeat. 7243 of the 7588 frames in the 4 September corpus, every 105 ms,
+payload 0840112200000001, which never varies once. A fixed payload at a fixed
+rate carries no information, so no signals are defined. Node field 10->00
+appears nowhere else.
 """
