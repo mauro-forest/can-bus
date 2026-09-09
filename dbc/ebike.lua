@@ -1252,6 +1252,13 @@ messages[0x03ff1000] = {
   },
 }
 
+messages[0x1ff8b028] = {
+  name = "LockTransition_B028",
+  extended = true,
+  comment = "[probable] One all-zero frame per lock-state transition. Listed in nodes.md as a constant until the 9 September unlock/lock session; the payload IS constant ... (dbc/signals.toml)",
+  signals = {},
+}
+
 local function dissect(tvb, pinfo, tree)
   local identifier = can_id()
   if not identifier then

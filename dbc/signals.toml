@@ -2336,3 +2336,34 @@ interruption -- during a ride, a fault, or a lock/unlock. That would make it a
 status bit rather than a boot flag. Nothing in the corpus shows this, but the
 corpus contains only four boots.
 """
+
+[[message]]
+id = 0x1FF8B028
+name = "LockTransition_B028"
+length = 8
+extended = true
+confidence = "probable"
+comment = """
+One all-zero frame per lock-state transition. Listed in nodes.md as a constant
+until the 9 September unlock/lock session; the payload IS constant, the timing
+is not.
+
+Across all eleven sessions it appears exactly once per UNLOCK and once per
+LOCK: 2.3-3.4 s after the +ACK:GTRTO UNLOCK and 0.4-0.9 s after the
++ACK:GTRTO LOCK, always within about 0.1 s of the first 13B76400 frame of the
+transition -- just before it on UNLOCK, just after it on LOCK. About 30
+occurrences, none without a transition nearby. It fired in the three sessions
+recorded with the HubLock removed, so the HubLock does not send it. It also
+fired about 24 s after each IoT REBOOT and around each MEULK in the
+battery-removal session, which may be transitions of the same state or may
+not; that is why this is "probable" and not "confirmed".
+
+No signals: every byte is 0 in every frame. Use the frame's presence as a
+transition marker.
+
+WHAT WOULD DISPROVE IT: a LOCK or UNLOCK transition with no 1FF8B028 within a
+few seconds, or a 1FF8B028 with no transition. The REBOOT and MEULK
+occurrences are the ones to look at: if the lock state can be shown not to
+change there, this is not a lock-transition marker but something broader,
+such as "component 3 changed state".
+"""

@@ -234,6 +234,61 @@ these five, plus the four in the `MEULK` exchange below, plus the four light
 identifiers (`02203606`, `02181606`, `03121606`, `02181608`). Nothing in that
 recording is unexplained, and the bike was never unlocked in it.
 
+## Unlock and lock, second by second
+
+The 9 September unlock/lock session (`2026-09-09T13-24-04_unlock-lock`) ran
+four UNLOCK/LOCK cycles with the HubLock fitted and the console reporting
+every command and state report. Timed from each `+ACK:GTRTO`, the four
+repeats agree to within about 10 ms at every step. This is the sequence the
+bike follows.
+
+**UNLOCK**
+
+```
++0.003    +ACK:GTRTO UNLOCK on the console
++0.174    02294503 -> 05124503  x5 at 5 ms     the IoT module polls the BMS manufacture block
++0.27     03FF1000                              heartbeat starts
++0.29     02181606, then 03121606               component 1 up
++0.40     03FF1001 03FF1603 03FF1605 05FF4610
++0.47     08F97603  0101000000000000  x3 at 300 ms
++0.55     05FF4000/4001, 05FF4602-4609          BMS broadcasts
++0.87     05FF4400 05FF4600 05FF4601
++1.17     03FF1600-1604                         speed-limit block
++2.06     02294609 -> 05124609                  state of charge
++2.6-2.7  13B76400 = 01, 04FF3604 starts, 02203606 wakes   component 3 and the HubLock
++2.7      +RESP:GTULS on the console, 12 ms after the first HubLock frame
++2.8-2.9  1FF8B028, once; then identity polls every 0.76 s until +20 s
++3.7      +RESP:GTFRI; +RESP:GTMLS at about +8
++10.17    04FF3400 and 03FF1400 first tick
+```
+
+**LOCK**
+
+```
++0.003     +ACK:GTRTO LOCK
++0.011     +RESP:GTLOR
++0.2-0.5   +RESP:GTLOC, 70-85 ms BEFORE the HubLock reports
++0.3-0.54  13B76400 = 00; 04FF3604 stops
++0.4-0.65  1FF8B028, once
++1.3-1.8   component 1 and 02203606 go quiet; 03121606 is the last
++3.6-3.9   the HubLock's second burst of three
+```
+
+From +2 s only the sleep set remains: `03FF1000` at 4 Hz, `04FF3400` every
+10 s, and the HubLock bursts. The whole bike is asleep under two seconds after
+a LOCK.
+
+Two things follow. `GTULS` is the IoT module reporting the unlock after it has
+seen the HubLock confirm it, so it is a report of state. `GTLOC` comes before
+the HubLock reports, so it is a report of intent -- the same caveat as
+`ECU Lock State` in `GTFRI`. `GTULS`, `GTLOR` and `GTLOC` are not yet parsed
+by `bikecan/queclink.py`.
+
+The unlock sequence up to +1.2 s is the tracker's boot sequence from "Cold
+boot polls the whole bus" below: the same first step (the manufacture block,
+five times) and the same `08F97603` handshake. What an UNLOCK adds, at
++2.6 s, is component 3 and the HubLock, which those wakes never bring up.
+
 ## An IoT reboot wakes the bus
 
 The reboot session sent `REBOOT` to the tracker three times with the bike
@@ -437,7 +492,8 @@ and 2, and any claim about `AA` = `60` or `64` from it carries that caveat.
 | `26 05` | `02FF2605` | 1 Hz. Bytes 0-4 are always `00 00 06 09 07`. Byte 7 is a rolling 0-9 sequence counter, one step per second. Bytes 5-6 change slowly and inconsistently -- byte 6 held for 47 s in one session and 20 s in another -- so they are not a tens digit and are not decoded. |
 | `16 03` | `03FF1603` | A value within 0.3 % of the pack voltage at 105 ms, quantised in ~16.6 mV steps, that changes only at component 1's power-up: it re-latched at three of the four pack restores and held through three IoT reboots. A coarse supply reading taken at boot. The offset to the BMS figure is 68-140 mV and not fixed. See `signals.toml`. |
 | `46 16`, `46 18` | `05124616`, `05124618` | BMS parameters. `4616` is a constant 12486. `4618` falls across sessions (3861, 3603-3719, 3540) but not monotonically within one. Undecoded. |
-| `86 xx`, `B0 28`, `B6 06`, `27 04`, `40 xx`, `A6 04` | `02488600`, `1FF8B028`, `0260B606`, `02FF2704`, `05FF4000`, `0258A604` | Constant payloads, mostly zero. A constant carries no information, so there is nothing to fit until something moves them. `0258A604` appeared only in the reboot session, 15 all-zero frames inside the reboot wakes. |
+| `86 xx`, `B6 06`, `27 04`, `40 xx`, `A6 04` | `02488600`, `0260B606`, `02FF2704`, `05FF4000`, `0258A604` | Constant payloads, mostly zero. A constant carries no information, so there is nothing to fit until something moves them. `0258A604` appeared only in the reboot session, 15 all-zero frames inside the reboot wakes. |
+| `B0 28` | `1FF8B028` | **A correction: not a constant.** It was listed with the constants because its payload is always zero. It is an event: exactly one frame per lock-state transition in all eleven sessions, 2.3-3.4 s after each UNLOCK and 0.4-0.9 s after each LOCK, within 0.1 s of the first `13B76400` frame either way. It also fired in the three sessions with the HubLock removed, so the HubLock does not send it; and about 24 s after each IoT REBOOT and around each `MEULK`. The information is in its timing, not its payload. See `LockTransition_B028` in `signals.toml`. |
 
 ## What the identifier fields look like
 
