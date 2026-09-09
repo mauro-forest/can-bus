@@ -226,11 +226,11 @@ local f_unknown_3604_constant200 = ProtoField.uint32("ebike.unknown_3604.constan
 local f_speed_1603_speed = ProtoField.double("ebike.speed_1603.speed", "Speed")
 -- Speed_1603.VoltageLike: Bytes 2-3 big-endian (CORRECTION: previously bytes 0-3; see the message comment). Everything rec
 local f_speed_1603_voltagelike = ProtoField.uint32("ebike.speed_1603.voltagelike", "VoltageLike", base.DEC)
--- Heartbeat_1000.SystemReady: Bit 0x08 of byte 0. Clear for the first seconds after the pack is connected, then set, and it ne
+-- Heartbeat_1000.SystemReady: Bit 0x08 of byte 0. On the 7 September bike: clear for the first seconds after the pack is conne
 local f_heartbeat_1000_systemready = ProtoField.uint32("ebike.heartbeat_1000.systemready", "SystemReady", base.DEC)
 -- Distance_1602.TripDistance: Bytes 4-5 big-endian. 0 at each UNLOCK, counts up only while Speed is non-zero, holds when it re
 local f_distance_1602_tripdistance = ProtoField.uint32("ebike.distance_1602.tripdistance", "TripDistance", base.DEC)
--- Distance_1602.Odometer: Bytes 1-2 big-endian, read as 10 m units. Byte 2 went 133 -> 141 -> 151 across loops 1 and 2 (+8
+-- Distance_1602.Odometer: Bytes 0-2 big-endian in 10 m units, matched to the console's measured total mileage on two bikes
 local f_distance_1602_odometer = ProtoField.uint32("ebike.distance_1602.odometer", "Odometer", base.DEC)
 
 ebike.fields = {
@@ -1262,7 +1262,7 @@ messages[0x03ff1000] = {
       field = f_heartbeat_1000_systemready,
       first = 0,
       count = 1,
-      suffix = " [probable]",
+      suffix = " [hypothesis]",
       value = function(tvb) return be(tvb, 4, 1, false) end,
     },
   },
@@ -1289,10 +1289,10 @@ messages[0x03ff1602] = {
     },
     {
       field = f_distance_1602_odometer,
-      first = 1,
-      count = 2,
-      suffix = " m [hypothesis]",
-      value = function(tvb) return be(tvb, 8, 16, false) * 10 end,
+      first = 0,
+      count = 3,
+      suffix = " m",
+      value = function(tvb) return be(tvb, 0, 24, false) * 10 end,
     },
   },
 }

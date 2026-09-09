@@ -13,6 +13,41 @@ remote command by name with a timestamp on the same clock as the CAN log
 (`+RESP:GTBMI`), and reports measured values the bus can be fitted against.
 See `bikecan/queclink.py`.
 
+## Two bikes in the corpus
+
+**Read this before comparing any session across the 7/9 September line.** The
+9 September sessions were recorded from a different bike. An audit of the
+whole corpus against this file found it; no session label says so.
+
+| | 7 September (nine sessions and the 4 September legacy set) | 9 September (three sessions) |
+|---|---|---|
+| IoT IMEI | `865969076362128` | `864864077015703` |
+| Firmware groups, serial and `03FF1501` / `05124501` | `4A / 04 / 0103` | `51 / 04 / 0104` |
+| `GTFRI` total mileage | 0.1 km | 4819.3 to 4819.5 km |
+| ECU error code while unlocked | `0210…` in 32 of 32 reports | `0000…` in 45 of 45 reports |
+| `03FF1000` heartbeat bytes 0-1 | `08 40` (`00 40` for 2 s after a cold boot) | `00 00`, all 7,241 frames |
+| After `LOCK` | sleeps to five identifiers, heartbeat continues | whole bus silent 14 to 20 s after every LOCK, heartbeat included |
+| `04FF3400` uptime | resets only on pack power | restarts from 0 at every UNLOCK |
+| `0260B606` byte 0 | 1 | 0 |
+| `02FF2605` byte 4 | `07` | `09` |
+| `05124616` | 12486 | 7591 |
+| `05124618` | 3540 to 3861 | −243 to 30 |
+| `02203606` byte 5 while awake | 1 | 0 |
+| `02F82400` | 965 to 994, then 0 to 11 | 36291 to 36348 |
+
+Identical on both: hardware version `C3 / EB / 05`, BMS model `RP13S35A`, both
+lamp bytes, the HubLock and its burst pattern, the unlock and lock sequence
+timings, the request/reply families and the identifier inventory (the
+9 September sessions add no new identifier). So the bus layout is the model's;
+the differences above are the bike's or the firmware's.
+
+Three consequences are recorded as corrections in the sections below: the
+five-identifier sleep, the ECU faults and the heartbeat's `SystemReady` bit
+are all bike-1 observations. And a message that was "constant" on one bike
+and holds a different constant on the other (`0260B606`, `02FF2605` byte 4,
+`05124616`) is a configuration or identity value, the same lesson already
+recorded against the max-speed byte.
+
 ## Confirmed components
 
 | Address | Component | Identifiers | How it was established |
@@ -160,6 +195,13 @@ glance, and only one of them is elapsed time.
 | `02F82400` | bytes 0-1, **little-endian** | **Unlocked time.** | Advanced 2 over a 2390 s sleep and 1 over 947 s, while `04FF3400` advanced 174 and 64. Runs 965 -> 994 across four sessions **including four pack removals**, then reads 0 in the first session after the three IoT `REBOOT`s. Held in the IoT module's RAM. Absent during wakes that are not unlocks. |
 | `03FF1400` | bytes 0-3, big-endian | **Awake time.** | Same test: +1 over 2402 s of sleep. Reset to 0 by the pack removals (16 -> 0), untouched by the IoT reboots (2 -> 3 -> 13). Pack-powered. |
 
+**A correction: pack power is not the only thing that resets `04FF3400`.** On
+the 9 September bike (see "Two bikes in the corpus") it read 0 at the first
+tick after every one of the eight UNLOCKs, because that bike's bus goes
+completely silent 14 to 20 s after each LOCK and `04FF3400` restarts with it.
+So on bike 2 it counts time since the last unlock, not since the pack was
+fitted. The reading below is from bike 1 and stands for bike 1.
+
 `04FF3400` is the volatile one. It resets to 0 on pack power-on, every time:
 in the battery-removal session it read 2282 before the first removal, and
 after each of the four restores its first frame arrived +10.009, +9.992,
@@ -224,6 +266,16 @@ Five is the count between wakes. It is not the count for the first 190 s after
 a pack restore, nor for ~5 s after an IoT reboot; see the next section. And
 with the HubLock fitted, the seconds after a `LOCK` add `13B76400`'s bursts.
 
+**A correction: this is the 7 September bike.** The 9 September bike does not
+sleep, it stops. After every LOCK in its two command sessions (seven LOCKs
+followed by a recording long enough to see) the heartbeat, `04FF3400` and the
+HubLock bursts ran for 13.8 to 19.6 s and then the bus fell silent, heartbeat
+included, until the next UNLOCK. Its 300 s BMS poll was never seen while
+locked. Whether that firmware powers the bus down on lock or the pack
+contactor opens is not known; the `GTFRI` main power voltage stays at 52.8 V
+through those silences, which argues against the contactor. The
+longest heartbeat gap on bike 1 outside a MEULK blackout is 0.3 s.
+
 That 300 s poll is worth noticing. It is how the tracker can report a battery
 percentage on a locked bike, and it explains why `GTFRI` gives a pack voltage
 and a percentage while zeroing the whole `<ECU Info>` compound: the battery
@@ -276,7 +328,9 @@ bike follows.
 
 From +2 s only the sleep set remains: `03FF1000` at 4 Hz, `04FF3400` every
 10 s, and the HubLock bursts. The whole bike is asleep under two seconds after
-a LOCK.
+a LOCK. On this bike (the 9 September one) that state lasts another 12 to
+18 s and then even the heartbeat stops; see the correction in the previous
+section.
 
 Two things follow. `GTULS` is the IoT module reporting the unlock after it has
 seen the HubLock confirm it, so it is a report of state. `GTLOC` comes before
@@ -301,7 +355,9 @@ BMS's 273 ms message:
 | rel 94.2 | rel 112.2 | rel 114.1 - 119.0 | 65 |
 | rel 592.8 | rel 611.1 | rel 613.0 - 617.9 | 64 |
 
-Between the bursts the bus is three identifiers (heartbeat, uptime, `04FF3603`).
+Between the bursts the bus is the five-identifier sleep set: heartbeat,
+uptime, `04FF3603`, and the 300 s BMS poll pair once in the 460 s quiet
+stretch. (An earlier version said three; the poll pair had been missed.)
 The identifiers in each burst are the pack-restore sweep of the battery-removal
 session, less the `MEULK` handshake: identity polls at `45`, `75`, `95`, the
 BMS live blocks `4601`-`4607` and `4610`, `13B16001`, plus `03FF16xx`,
@@ -476,6 +532,13 @@ It is a lead and not a finding, because `AA` = `60` is not `AA` = `64`.
 Refitting the HubLock and recording another cold boot would settle it in one
 session.
 
+**Settled against, by the 9 September pedalling session.** That bike has its
+HubLock fitted (`13B76400` sends its 21 frames after every UNLOCK and nine
+after every LOCK) and its three pack restores polled `13B16001` 18 times
+without one reply. A node that is present and transmitting does not leave its
+identity poll unanswered, so `13B16001` is not the HubLock. `PP` = `13` is
+still shared with nothing else, and what sits at `AA` = `60` is open again.
+
 ### A confound in this session
 
 `13B76400` is **absent** from the battery-removal recording. The HubLock was
@@ -497,11 +560,21 @@ What moved, all of it at component 1 (`AA` = `16`):
 ```
 03FF1603  bytes 0-1   0 -> 218..256 -> 0     ramps while pedalling; 0.1 km/h fits the 25 km/h limit
 03FF1602  bytes 4-5   0 -> 81 / 102          per-unlock counter, advances only while 1603 moves; metres fit
-03FF1602  bytes 1-2   133 -> 141 -> 151      cumulative, +1 per 10 of the above; odometer in 10 m fits
+03FF1602  bytes 0-2   0x075A85 -> 0x075AA2   cumulative, +1 per 10 of the above; odometer in 10 m, CONFIRMED below
 03FF1604  byte 1      0 -> ~190, then holds   tracks the speed but keeps its last value until LOCK
 03FF1604  byte 3      0 -> 16 / 19            counts while pedalling, then holds
 05FF4610  current     -0.45 to -0.86 A        loop 2 only; the motor assisted in one loop of four
 ```
+
+**The odometer is confirmed, and it is three bytes wide.** The first reading
+took bytes 1-2 as the field, with byte 1 (`0x5A`) a width guess, and got
+231.7 km. Byte 0 belongs to it: bytes 0-2 big-endian in 10 m units give
+`0x075A85` = 4819.25 km at the start of the session and `0x075AA2` = 4819.54 km
+at the end, while `GTFRI`'s total mileage on the same clock read 4819.3, then
+4819.4, then 4819.5. On the 7 September bike the same bytes read `0x000005` =
+0.05 km against a reported 0.1 km, which is the same value at `GTFRI`'s
+0.1 km resolution. Two bikes, two odometers, both matched to a measured value.
+`signals.toml` carries it as `Distance_1602.Odometer`.
 
 What did not move: `04FF3604`, the 30 ms message. Both channels held their
 idle 2-9 through every loop, which removes speed, cadence and torque as
@@ -524,12 +597,12 @@ padding. Four sessions had read bytes 0-3 as one 32-bit value because bytes
 | `AA BB` | Identifiers | What is known |
 |---|---|---|
 | `36 04` | `04FF3604` | 30 ms, the fastest message on the bus. **Still the most valuable unknown**, but no longer a mystery in shape: two 16-bit analogue channels idling at 4.47 and 3.05 with no correlation between them, plus the constant 200 and a flag. Not a lamp message. It needs a ride -- see `signals.toml`. |
-| `10 00`, `10 01` | `03FF1000`, `03FF1001` | The 105 ms heartbeat. Bytes 1-7 have never varied, across 83,259 frames and five sessions; bit `0x08` of byte 0 is clear for the first two seconds after a cold boot and set thereafter -- see `Heartbeat_1000.SystemReady`. `AA` = `10` fits no channel pattern, so it looks like a broadcast. |
-| `26 05` | `02FF2605` | 1 Hz. Bytes 0-4 are always `00 00 06 09 07`. Byte 7 is a rolling 0-9 sequence counter, one step per second. Bytes 5-6 change slowly and inconsistently -- byte 6 held for 47 s in one session and 20 s in another -- so they are not a tens digit and are not decoded. |
+| `10 00`, `10 01` | `03FF1000`, `03FF1001` | The 105 ms heartbeat. Bytes 2-7 have never varied, across 101,080 frames and thirteen sessions. Bytes 0-1 are per bike: `08 40` on the 7 September bike (`00 40` for the first two seconds after a cold boot), `00 00` on the 9 September bike in all 7,241 frames, unlocked and pedalling included. So bit `0x08` of byte 0 is not a ready flag in the sense recorded; `Heartbeat_1000.SystemReady` is downgraded to `hypothesis` in `signals.toml` and the name is kept only as a label. `AA` = `10` fits no channel pattern, so it looks like a broadcast. |
+| `26 05` | `02FF2605` | 1 Hz. Bytes 0-4 are `00 00 06 09 07` on the 7 September bike and `00 00 06 09 09` on the 9 September one, so byte 4 is a per-bike value. Byte 7 is a rolling 0-9 sequence counter, one step per second. Bytes 5-6 change slowly and inconsistently -- byte 6 held for 47 s in one session and 20 s in another -- so they are not a tens digit and are not decoded. |
 | `16 03` | `03FF1603` | **A correction: two fields, and bytes 0-1 are probably speed.** The "voltage-like" value described here before is bytes 2-3 only; bytes 0-1 had simply never been non-zero until the bike was pedalled. See "Pedalling on the bench" and `Speed_1603` in `signals.toml`. The bytes 2-3 reading is weaker than it was: 2.4-2.8 V above the pack in the pedalling session. |
-| `46 16`, `46 18` | `05124616`, `05124618` | BMS parameters. `4616` is a constant 12486. `4618` falls across sessions (3861, 3603-3719, 3540) but not monotonically within one. Undecoded. |
-| `86 xx`, `B6 06`, `27 04`, `40 xx`, `A6 04` | `02488600`, `0260B606`, `02FF2704`, `05FF4000`, `0258A604` | Constant payloads, mostly zero. A constant carries no information, so there is nothing to fit until something moves them. `0258A604` appeared only in the reboot session, 15 all-zero frames inside the reboot wakes. |
-| `B0 28` | `1FF8B028` | **A correction: not a constant.** It was listed with the constants because its payload is always zero. It is an event: exactly one frame per lock-state transition in all eleven sessions, 2.3-3.4 s after each UNLOCK and 0.4-0.9 s after each LOCK, within 0.1 s of the first `13B76400` frame either way. It also fired in the three sessions with the HubLock removed, so the HubLock does not send it; and about 24 s after each IoT REBOOT and around each `MEULK`. The information is in its timing, not its payload. See `LockTransition_B028` in `signals.toml`. |
+| `46 16`, `46 18` | `05124616`, `05124618` | BMS parameters. `4616` is a constant per pack: 12486 on the 7 September bike, 7591 on the 9 September one. `4618` falls across sessions on bike 1 (3861, 3603-3719, 3540) but not monotonically within one; on bike 2 it is small and negative (−243 to 30 as a signed 32-bit value), so it is a signed quantity that can cross zero. Undecoded. |
+| `86 xx`, `B6 06`, `27 04`, `40 xx`, `A6 04` | `02488600`, `0260B606`, `02FF2704`, `05FF4000`, `0258A604` | Constant payloads within a bike, mostly zero. `0260B606` byte 0 is 1 on the 7 September bike and 0 on the 9 September one, so it is a per-bike setting or state, not padding. The rest carry no information, so there is nothing to fit until something moves them. `0258A604` appeared only in the reboot session, 15 all-zero frames inside the reboot wakes. |
+| `B0 28` | `1FF8B028` | **A correction: not a constant.** It was listed with the constants because its payload is always zero. It is an event: one frame per lock-state transition in every session, 2.3-3.4 s after each UNLOCK and 0.4-0.9 s after each LOCK, within 0.1 s of the first `13B76400` frame either way. It also fired in the three sessions with the HubLock removed, so the HubLock does not send it. It fires **twice** around each `MEULK` (3.4 to 4.7 s apart, seven of seven) and twice after each IoT `REBOOT` (0.8 s apart, three of three). Session 3 has a fourth frame at rel 201 s with no command in the serial log; `04FF3604` stops there and the bus sleeps, so that is a lock the console did not record, not an exception. The information is in its timing, not its payload. See `LockTransition_B028` in `signals.toml`. |
 
 ## What the identifier fields look like
 
@@ -547,8 +620,10 @@ Across all four corpora, unchanged from the previous measurement:
 - `AA` takes 23 values, `BB` takes 20. The new `AA` values are `60`, `75`,
   `86` and `95` from the cold-boot sweep, and `A6` from the reboot session.
 
-These counts are over the whole corpus: 123 identifiers across ten session
-directories (nine of 7 September and the 4 September legacy set). Sessions 6
+These counts are over the whole corpus: 123 identifiers across thirteen session
+directories (nine of 7 September, three of 9 September from the second bike,
+and the 4 September legacy set). The 9 September sessions add no identifier
+and no field value. Sessions 6
 and 7 add nothing: 6 contains no valid command (a malformed `GTRTO` that was
 never acknowledged) and is a pure locked baseline of five identifiers; 7 sent
 three `GTECC`s to a locked bike and shows three identifiers.
@@ -623,10 +698,13 @@ what the IoT module believes rather than what the hardware did.
 
 ## What would settle the rest
 
-1. **Ride the bike.** Every session so far is stationary: speed 0.0 and one
-   fixed GPS position throughout. Speed, torque and motor current cannot be
-   found where they are all zero, and they are the signals most worth having.
-   `04FF3604` will move first, because it is the fastest message on the bus.
+1. **Ride the bike.** Every session is still stationary in the sense that
+   matters: the bench pedalling session drove the ECU speed to 24.3 km/h and
+   the GPS speed to 3.7 km/h, but the wheel carried no load, the motor
+   assisted in one loop of four, and `04FF3604` did not move. Torque and
+   motor current cannot be found where they are zero, and they are the
+   signals most worth having. `04FF3604` will move first, because it is the
+   fastest message on the bus.
 2. **Move a temperature.** Six temperature bytes are recorded and not one can
    be assigned, because the whole corpus is 27-29 degC. A charge cycle heats
    the MOS, a discharge heats the cells; either separates them.
@@ -651,9 +729,11 @@ what the IoT module believes rather than what the hardware did.
    is the IoT module.
 7. **Disconnection.** With one component unplugged, the traffic that stops
    names its address. Bench only.
-8. **Reconnect the HubLock.** It has been off the bike since the 7 September
-   disconnection session, and every recording since is missing `13B76400`. It
-   is also the most likely reason `13B16001` is polled and never answered.
+8. **Reconnect the HubLock.** Done, in effect: the 9 September bike has its
+   HubLock fitted and `13B76400` is in all three of its sessions. That is what
+   showed `13B16001` is not the HubLock (see "Requests that never get an
+   answer"). A cold boot of bike 1 with its HubLock refitted would still be
+   worth having, to see whether the same poll goes unanswered there too.
 9. **Release the pack without removing it.** That separates the two readings
    of the `MEULK` result below: contactor first, or contacts broken by the
    pack moving.
@@ -699,8 +779,8 @@ two after it. That claim is wrong and is withdrawn. It was produced by
 aggregating faults per session and comparing sessions, which hid the fact that
 the error code varies *within* a session.
 
-**What is actually true: the faults are present whenever the ECU is reporting
-at all.** Across all 75 GTFRI reports on record:
+**What is actually true: on the 7 September bike the faults are present
+whenever the ECU is reporting at all.** Across its 75 GTFRI reports:
 
 | ECU lock state | error code `0210…` | error code `0000…` |
 |---|---|---|
@@ -709,6 +789,13 @@ at all.** Across all 75 GTFRI reports on record:
 
 Unlocked is 25 out of 25. The 8 locked-with-fault reports are the ones arriving
 a second or two after a `LOCK`, before the ECU goes quiet.
+
+**And on the 9 September bike there are no faults at all**: 45 unlocked
+reports with the ECU publishing (health 95 %, cell temperature 21 degC, pack
+current non-zero) and every one of them reads `0000000000000000`. Bits 52 and
+57 are a property of bike 1, not of the model or the firmware line. Whole-corpus
+totals are 144 reports, 32 of 77 unlocked with the fault; that number mixes
+two bikes and should not be read as a rate.
 
 And the "clean" reports are not clean. Decoding `<ECU Info>` shows every live
 measurement zeroed while the static fields survive:
@@ -728,8 +815,8 @@ reboot session and the two after it were locked throughout, which is the whole
 of why they looked clean.
 
 The original sentence in this section -- two undocumented faults active on this
-bike throughout -- was right. Both faults stand, and nothing so far has cleared
-either of them.
+bike throughout -- was right for bike 1. Both faults stand there, and nothing
+so far has cleared either of them. Bike 2 never had them.
 
 **What would still be worth knowing:** whether bits 52 and 57 appear anywhere in
 the CAN traffic. If they exist only in `GTFRI`, they are the IoT module's

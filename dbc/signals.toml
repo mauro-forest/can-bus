@@ -2333,7 +2333,14 @@ one of those recordings contained a cold boot. The battery-removal session
 supplied four, and in each of them byte 0 is 0x00 for the first two seconds
 after power returns and 0x08 for ever after. See SystemReady below.
 
-The remaining seven bytes have never varied, across 83,259 frames.
+SECOND CORRECTION -- the payload is per bike. The 9 September sessions come
+from a different bike (see "Two bikes in the corpus" in nodes.md) and its
+heartbeat is 0000112200000001 in all 7,241 frames: byte 0 is 0x00 throughout,
+unlocked and pedalling included, and byte 1 is 0x00 where bike 1 has 0x40. So
+bytes 0 and 1 are not boot state, or not only boot state; they differ between
+two bikes that share hardware version, BMS model and bus layout, and differ in
+firmware (0x4A/0x0103 against 0x51/0x0104). Bytes 2-7 (11 22 00 00 00 01) have
+never varied, across 101,080 frames and thirteen sessions.
 
 It stays "probable" rather than confirmed because nothing has tied it to a
 component or an action. Calling it a heartbeat is an inference from its shape.
@@ -2347,10 +2354,21 @@ byte_order = "big_endian"
 signed = false
 scale = 1
 offset = 0
-confidence = "probable"
+confidence = "hypothesis"
 evidence = """
-Bit 0x08 of byte 0. Clear for the first seconds after the pack is connected,
-then set, and it never clears again while power is held.
+Bit 0x08 of byte 0. On the 7 September bike: clear for the first seconds after
+the pack is connected, then set, and it never clears again while power is
+held.
+
+CORRECTION, downgraded from "probable" to "hypothesis". The 9 September bike
+never sets this bit: 7,241 frames across three sessions, all 0x00 in byte 0,
+while unlocked, pedalling and reporting ECU speed up to 24.3 km/h. A bike
+that is plainly running with the bit clear is the disproof the paragraph at
+the end asked for, in a form it did not anticipate. The bit still marks the
+first two seconds after a cold boot on bike 1, so the boot timing below
+stands as an observation of that bike; what the bit means is open. It is not
+"system ready" in any sense that holds across the two bikes. The name is kept
+so existing filters still work; treat it as a label, not a reading.
 
 Four pack removals in the 7 September battery-removal session, four identical
 boots. The heartbeat itself restarts +0.10 to +0.12 s after power returns,
@@ -2365,8 +2383,11 @@ is close to the 2.1-2.6 s that 04FF3604 takes to start after an UNLOCK, and
 
 WHAT WOULD DISPROVE IT: a recording where the bit clears without a power
 interruption -- during a ride, a fault, or a lock/unlock. That would make it a
-status bit rather than a boot flag. Nothing in the corpus shows this, but the
-corpus contains only four boots.
+status bit rather than a boot flag. (Written when the corpus contained only
+four boots and one bike; the second bike then did something this did not
+foresee, see the correction above.) WHAT WOULD SETTLE IT NOW: a cold boot of
+bike 2, to see whether the bit ever sets there; and any state on bike 1 that
+clears it without a power cut.
 """
 
 [[message]]
@@ -2436,22 +2457,29 @@ distance by more than the speed integration does.
 
 [[message.signal]]
 name = "Odometer"
-start_bit = 8
-length = 16
+start_bit = 0
+length = 24
 byte_order = "big_endian"
 signed = false
 scale = 10
 offset = 0
 unit = "m"
-confidence = "hypothesis"
+confidence = "confirmed"
 evidence = """
-Bytes 1-2 big-endian, read as 10 m units. Byte 2 went 133 -> 141 -> 151 across
+Bytes 0-2 big-endian in 10 m units, matched to the console's measured total
+mileage on two bikes. 9 September bike: 0x075A85 = 481925 -> 4819.25 km at the
+start of the pedalling session and 0x075AA2 -> 4819.54 km at its end, while
++RESP:GTFRI <ECU Total Mileage> on the same clock read 4819.3, 4819.4, 4819.5.
+7 September bike: 0x000005 -> 0.05 km against a reported 0.1 km, the same
+value at GTFRI's 0.1 km resolution. Byte 2 stepped 133 -> 141 -> 151 across
 loops 1 and 2 (+8, +10) while TripDistance reached 81 and 102: one step per
-ten metres of trip, and it does not reset at UNLOCK. 0x5A86 = 23174 -> 231.7
-km, a plausible total for a shared bike. Only byte 2 has been seen to move;
-byte 1 (0x5A) is the width guess. WHAT WOULD DISPROVE IT: a ride where it
-advances by other than TripDistance / 10, or a pack removal resetting it (an
-odometer must not).
+ten metres of trip. It does not reset at UNLOCK.
+
+CORRECTION: first recorded as bytes 1-2 with byte 1 a width guess, which gave
+231.7 km. Byte 0 (0x07) is the high byte; without it the value disagreed with
+GTFRI by a factor of twenty. WHAT WOULD DISPROVE IT: a ride where it advances
+by other than TripDistance / 10, or a pack removal resetting it (an odometer
+must not).
 """
 
 [[message]]
