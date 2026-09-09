@@ -1,6 +1,3 @@
-# Recordings are evidence, not source. They are pulled from the Pi, never committed.
-/data/
-
 # Pi connection details are per-machine.
 /tools/pi.env
 

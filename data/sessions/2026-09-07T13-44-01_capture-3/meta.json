@@ -1,0 +1,32 @@
+{
+  "can_bitrate_actual": 250000,
+  "can_bitrate_configured": 250000,
+  "can_interface": "can0",
+  "can_state_at_start": "ERROR-ACTIVE",
+  "clean_shutdown": false,
+  "clock": {
+    "epoch": 1788788641.0192423,
+    "ntp_synchronized": true,
+    "timedatectl": {
+      "CanNTP": "yes",
+      "LocalRTC": "no",
+      "NTP": "yes",
+      "NTPSynchronized": "yes",
+      "RTCTimeUSec": "Mon 2026-09-07 14:44:01 BST",
+      "TimeUSec": "Mon 2026-09-07 14:44:01 BST",
+      "Timezone": "Europe/London"
+    },
+    "tz": "BST+0100",
+    "utc": "2026-09-07T13:44:01.019230+00:00"
+  },
+  "config_source": "/home/forest/bikelog/config/capture.toml",
+  "git_rev": "unknown",
+  "host": "uk-ebike",
+  "label": "Capture #3",
+  "serial_baudrate": 115200,
+  "serial_port": "/dev/ttyUSB0",
+  "session_id": "2026-09-07T13-44-01_capture-3",
+  "started_epoch": 1788788641.017691,
+  "started_utc": "2026-09-07T13:44:01.017691+00:00",
+  "uname": "Linux uk-ebike 6.18.39+rpt-rpi-2712 #1 SMP PREEMPT Debian 1:6.18.39-1+rpt1 (2026-07-29) aarch64 "
+}
