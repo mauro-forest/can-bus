@@ -332,11 +332,31 @@ a LOCK. On this bike (the 9 September one) that state lasts another 12 to
 18 s and then even the heartbeat stops; see the correction in the previous
 section.
 
-Two things follow. `GTULS` is the IoT module reporting the unlock after it has
-seen the HubLock confirm it, so it is a report of state. `GTLOC` comes before
-the HubLock reports, so it is a report of intent -- the same caveat as
-`ECU Lock State` in `GTFRI`. `GTULS`, `GTLOR` and `GTLOC` are not yet parsed
-by `bikecan/queclink.py`.
+Two things follow. `GTULS` is a report of state: it arrives once the bike has
+come up, not when the command was accepted. `GTLOC` comes before the HubLock
+reports, so it is a report of intent -- the same caveat as `ECU Lock State` in
+`GTFRI`. `GTULS`, `GTLOR` and `GTLOC` are not yet parsed by
+`bikecan/queclink.py`.
+
+**A correction: `GTULS` does not wait for the HubLock.** It was recorded here
+as the tracker reporting the unlock after seeing the HubLock confirm it, on
+the strength of the 12 ms gap above. In the four bike-1 sessions recorded with
+the HubLock physically absent, `GTULS` still arrived 2.07 to 3.41 s after the
+acknowledgement, in step with component 3 waking (`04FF3604` starting,
+`02203606` byte 0 going to 1) in all seven unlocks. What `GTULS` follows is
+the ECU coming up; the HubLock happens to report at the same moment when it is
+fitted.
+
+**The HubLock does not change the timing either way.** Across all sessions,
+with repeated UNLOCKs on an already-unlocked bike excluded, the acknowledgement
+to component 3 waking is 2.05-2.57 s with the HubLock fitted on bike 1 (three
+unlocks), 2.08-3.20 s with it absent (seven), and 2.56-2.75 s on bike 2
+(eight). The acknowledgement to `04FF3604` stopping after a LOCK is
+0.30-0.57 s fitted, 0.26-0.81 s absent, 0.25-0.77 s on bike 2. The fitted
+sample on bike 1 is three of each, so a difference under about half a second
+would not show. The unlock latency falls into two clusters, near 2.05 s and
+near 2.6 s, in every configuration, which looks like a polling interval on
+the tracker's side rather than anything the HubLock does.
 
 The unlock sequence up to +1.2 s is the tracker's boot sequence from "Cold
 boot polls the whole bus" below: the same first step (the manufacture block,
