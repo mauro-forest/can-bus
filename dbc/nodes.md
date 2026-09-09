@@ -19,7 +19,7 @@ See `bikecan/queclink.py`.
 |---|---|---|---|
 | `AA` = `36` | **Headlight** | `02203606` | `HLON` at 1788785214.368 and `HLOFF` at 1788785234.208 were followed by byte 1 of `02203606` going to 1 after 0.77 s and to 0 after 0.33 s. Nothing else on the bus changed in either window. Cross-checks against `<ECU Info>` field 5. |
 | `AA` = `16` | **Rear light** | `02181606` | `RLONEN` at 1788785392.364 and `RLOFF` at 1788785412.125 were followed by byte 4 going to 1 after 0.76 s and to 0 after 0.40 s. Nothing else changed. Cross-checks against `<ECU Info>` field 6. |
-| `AA` = `64` | **HubLock** | `13B76400` | **Confirmed by disconnection.** With the HubLock disabled this was the only identifier to vanish: 95 identifiers became 94, none appeared in its place, and both lamps kept toggling. Re-checked as a set difference over the whole recordings: `session2 - session3 = {13B76400}` exactly, and `session3 - session2` is empty. |
+| `AA` = `64` | **HubLock** | `13B76400` | **Confirmed by disconnection.** With the HubLock disabled this was the only identifier to vanish: 95 identifiers became 94, none appeared in its place, and both lamps kept toggling. Re-checked as a set difference over the whole recordings: `session2 - session3 = {13B76400}` exactly, and `session3 - session2` is empty. Note it is not periodic: it sends ~20 frames after `UNLOCK` and three bursts of three after `LOCK`, and nothing otherwise, so a locked idle recording never shows it whether or not the HubLock is fitted. |
 | `AA` = `45`, `46` | **BMS** | `05FF46xx`, `05124[56]xx` | `+RESP:GTBMI` relays the `46` payloads **verbatim**. Thirteen cell voltages sum to the pack voltage `05FF4610` reports separately. `05124502` at the identity address is the ASCII string `RP13S35A` -- the pack's own model number, and `13S` is 13 cells in series. Pack current matches `<Battery Status>` byte for byte in 27 of 29 reports; state of charge matches `<Scooter Battery Percentage>` at 88, 98, 99 and 100 %. |
 
 Both lamps also switch on with `UNLOCK` and off with `LOCK`, because unlocking
@@ -27,11 +27,16 @@ wakes the whole bike. That is why a periodic `GTFRI` still showed
 `head_light_status=1` after `HLOFF`: the unlock that followed turned it back
 on.
 
-**The lamps are not lamp nodes.** Byte 0 of each light message carries the
-bike's wake state, not the light, and `AA` = `16` also publishes a pack
-voltage (`03FF1603`) while `AA` = `36` publishes the fastest message on the bus
+**The lamps are not lamp nodes.** Byte 0 of each light message carries a wake
+state, not the light, and `AA` = `16` also publishes a pack voltage
+(`03FF1603`) while `AA` = `36` publishes the fastest message on the bus
 (`04FF3604`, 30 ms). Neither is what a lamp sends. These are two controllers,
 each reporting a lamp it drives. See the channel scheme below.
+
+**And the two wake bytes are not one fact.** When the bus is woken without an
+`UNLOCK` (see "An IoT reboot wakes the bus"), `02181606` byte 0 goes to 1 and
+`02203606` byte 0 stays at 2. Component 1 wakes; component 3 does not. Each
+byte reports its own controller.
 
 ## `AA` reads as `<component><channel>`
 
@@ -71,7 +76,8 @@ Which gives four components, one of them confirmed:
 
 | Component | Counter | Identity | Live data | What it is |
 |---|---|---|---|---|
-| 1 | `14` | `15` | `16` | Rear light bit, a pack voltage, 11 identifiers. **Hypothesis: the speed panel.** |
+| 1 | `14` | `15` | `16` | Rear light bit, a pack voltage, 11 identifiers. **Hypothesis: the speed panel.** Its counter and its latched voltage both reset on pack power and survive an IoT reboot. |
+| 2 | `24` | -- | `26`, `27` | The unlocked-time counter, the 10 s nonce, the `MEULK` challenge. **Probable: the IoT module.** Its counter survived four pack removals and reset across three IoT reboots, which only the component with its own backup battery can do. No `25` identity poll exists because the master does not poll itself. |
 | 3 | `34` | `35` | `36` | Headlight bit, the 30 ms message, the uptime counter. **Hypothesis: the ECU.** |
 | 4 | `44` | `45` | `46` | **The BMS, confirmed.** |
 | 7 | -- | `75` | -- | Answers identity polls only. Found at cold boot; nothing else known. |
@@ -95,10 +101,12 @@ reply, and it does nothing else on the bus. It cannot be matched against
 `<ECU Info>`, which carries three version groups and has all three already
 spoken for by `15`, `35` and `45`.
 
-**What argues against the scheme.** `AA` = `10`, `B0` and `B6` do not fit it at
-all. `AA` = `26` has a `BB` of `05`, which under a strict reading of the table
-should not happen. And `AA` = `24`, `26`, `27` look like a component whose
-channels do not line up (`24` is a counter, but there is no `25`).
+**What argues against the scheme.** `AA` = `10`, `B0`, `B6` and `A6` do not
+fit it at all. `AA` = `26` has a `BB` of `05`, which under a strict reading of
+the table should not happen. `AA` = `24`, `26`, `27` used to be listed here as a
+component whose channels do not line up (`24` is a counter, but there is no
+`25`); the reboot session resolved that -- see component 2 above -- and the
+missing `25` is what you would expect of the node that sends the polls.
 
 The cold-boot sweep adds three more misfits: `AA` = `60`, `86` and `95` are
 polled and never answer, and their channel digits are `0` and `5` and `6`
@@ -149,8 +157,8 @@ glance, and only one of them is elapsed time.
 | Identifier | Encoding | Counts | Evidence |
 |---|---|---|---|
 | `04FF3400` | bytes 2-3, big-endian | **Elapsed time.** Uptime. | 845/845 steps equal the wall clock exactly. Continuous across the three 7 September sessions to the tick: +174 over a 1740 s gap, +64 over 640 s. |
-| `02F82400` | bytes 0-1, **little-endian** | **Awake time.** | Advanced 2 over a 2390 s sleep and 1 over 947 s, while `04FF3400` advanced 174 and 64. Runs 965 -> 994 across the four sessions, monotonically, **including across four pack removals**. Non-volatile. |
-| `03FF1400` | bytes 0-3, big-endian | **Awake time.** | Same test: +1 over 2402 s of sleep. Started from 0 recently, so it had been reset. |
+| `02F82400` | bytes 0-1, **little-endian** | **Unlocked time.** | Advanced 2 over a 2390 s sleep and 1 over 947 s, while `04FF3400` advanced 174 and 64. Runs 965 -> 994 across four sessions **including four pack removals**, then reads 0 in the first session after the three IoT `REBOOT`s. Held in the IoT module's RAM. Absent during wakes that are not unlocks. |
+| `03FF1400` | bytes 0-3, big-endian | **Awake time.** | Same test: +1 over 2402 s of sleep. Reset to 0 by the pack removals (16 -> 0), untouched by the IoT reboots (2 -> 3 -> 13). Pack-powered. |
 
 `04FF3400` is the volatile one. It resets to 0 on pack power-on, every time:
 in the battery-removal session it read 2282 before the first removal, and
@@ -161,20 +169,37 @@ uptime since the pack was connected, and it runs through sleep but not through
 a disconnection.
 
 `02F82400` sits at the other extreme: it crossed all four removals without
-resetting, so it is held in non-volatile storage.
+resetting. It was recorded here as non-volatile, and that was wrong: it read
+994 at the end of the battery-removal session and 0 at the start of the
+unlock/lock session, and the only recording between the two is the reboot
+session with its three IoT `REBOOT`s. A counter that survives the pack being
+pulled and not a software restart of the tracker is in the tracker's RAM,
+which is the one RAM on the bike that the pack does not power. The reset
+itself was not caught on tape; the inference is from what lies between 994
+and 0.
 
 **A correction: `05FF4400` is not a counter of time and never was.** It was
 listed here as a fourth 10-second counter that reset after a long sleep. It is
-a frame index. Its value equals the frame's position within the session -- 0,
-1, 2, ... -- in all 37 frames of all four sessions, and in the battery-removal
-session it stepped by exactly +1 across transmit intervals of 2.7 s and of
-68.3 s alike. No clock does that. The earlier reading survived three sessions
-only because the message usually goes out about every 10.5 s, so the count and
-the wall clock advanced together by coincidence.
+a frame counter. It steps by exactly +1 per frame -- in the battery-removal
+session across transmit intervals of 2.7 s and of 68.3 s alike. No clock does
+that. The earlier reading survived three sessions only because the message
+usually goes out about every 10.5 s, so the count and the wall clock advanced
+together by coincidence.
+
+It is not, however, "the frame index within the session", which is how it was
+first corrected here: the reboot session runs 12-17, continuing from the
+battery-removal session's 11 across 430 s and three IoT reboots. It reset to 0
+at the first frame after `UNLOCK` in five sessions, each following a sleep of
+640 s or more, and did not reset at the `UNLOCK` in the battery-removal session
+(BMS already awake) or across a 495 s sleep in the reboot session. Whatever
+resets it is on the BMS side and looks like a sleep timer between 495 and
+640 s. That is a bracket from one pair of gaps, not a measurement.
 
 The deep-sleep threshold that was derived from it -- "between 51 s and 947 s"
 -- rests on nothing, and the experiment proposed to narrow it would have read
-a frame index as elapsed time. Both are withdrawn.
+a frame index as elapsed time. Both are withdrawn. The 495-640 s bracket above
+is a different claim, resting on when the frame count resets rather than on
+its value, and it is the one lead left on the sleep threshold.
 
 ## The sleeping bus is exactly five identifiers
 
@@ -189,9 +214,15 @@ An idle locked bike sends only:
 ```
 
 Unlocking wakes 89 more, so any inventory from a locked bike is a small
-fraction of what exists. The 30 ms `04FF3604` is the best wake detector on the
-bus: its active runs begin 2.1-2.6 s after each `UNLOCK` and end 0.3-0.8 s
-after each `LOCK`, over four unlocks and three locks.
+fraction of what exists. The 30 ms `04FF3604` is the best **unlock** detector
+on the bus: its active runs begin 2.05-3.2 s after each `UNLOCK` and end
+0.26-0.81 s after each `LOCK`, over ten unlocks and eight locks. It is not a
+bus-activity detector: the two ways of waking the bus without an unlock (next
+section) bring up ~65 identifiers and this is not among them.
+
+Five is the count between wakes. It is not the count for the first 190 s after
+a pack restore, nor for ~5 s after an IoT reboot; see the next section. And
+with the HubLock fitted, the seconds after a `LOCK` add `13B76400`'s bursts.
 
 That 300 s poll is worth noticing. It is how the tracker can report a battery
 percentage on a locked bike, and it explains why `GTFRI` gives a pack voltage
@@ -203,12 +234,58 @@ these five, plus the four in the `MEULK` exchange below, plus the four light
 identifiers (`02203606`, `02181606`, `03121606`, `02181608`). Nothing in that
 recording is unexplained, and the bike was never unlocked in it.
 
+## An IoT reboot wakes the bus
+
+The reboot session sent `REBOOT` to the tracker three times with the bike
+locked throughout, and each time the bus came up. Measured on `05FF4610`, the
+BMS's 273 ms message:
+
+| `REBOOT` ack | `+RESP:GTPNA` (tracker back) | Bus active | Identifiers |
+|---|---|---|---|
+| rel 7.8 | rel 26.1 | rel 28.1 - 32.7 | 65 |
+| rel 94.2 | rel 112.2 | rel 114.1 - 119.0 | 65 |
+| rel 592.8 | rel 611.1 | rel 613.0 - 617.9 | 64 |
+
+Between the bursts the bus is three identifiers (heartbeat, uptime, `04FF3603`).
+The identifiers in each burst are the pack-restore sweep of the battery-removal
+session, less the `MEULK` handshake: identity polls at `45`, `75`, `95`, the
+BMS live blocks `4601`-`4607` and `4610`, `13B16001`, plus `03FF16xx`,
+`02181606` and the `02FF2602` nonce. One identifier is new, `0258A604`, all
+zero, 15 frames.
+
+Three things follow.
+
+1. **The master is the IoT module.** The same sweep runs when the pack is
+   restored and when the tracker restarts, and only the tracker is involved in
+   both. So "cold boot polls the whole bus" below is the tracker's boot
+   sequence, run whenever it comes up or sees main power return.
+2. **Not every component wakes.** `04FF3604`, `02F82400`, `13B76400` and the
+   awake state of `02203606` never appear in these wakes, while `02181606`
+   publishes its full awake payload (`0100190001030200`: byte 0 = 1, rear light
+   bit set, max speed 25). Component 1 and the BMS answer the tracker;
+   component 3 does not.
+3. **After a pack restore the bus stays in this state.** In the battery-removal
+   session the ~65 identifiers ran from the last restore (rel 92) to the
+   `UNLOCK` (rel 283) without a break. The five-identifier sleep is what the
+   bus settles into, not what it boots into.
+
+A caution that comes with this: `GTFRI` in those states reports a headlight
+on and a rear light off while `02203606` byte 1 reads 0 and `02181606` byte 4
+reads 1 -- the opposite of the bus, in both directions. The console's
+`<ECU Info>` block is a cached copy (see `05124615` in `signals.toml`, where
+that is shown for the temperatures), so these are stale values from the last
+unlock, not a contradiction to resolve. Do not compare `<ECU Info>` fields with
+the bus unless the bike is unlocked.
+
 ## `AA` = `26` is an authentication channel
 
 `02FF2602` carries eight high-entropy bytes, fresh every time, every 10 s while
-the bike is awake -- and it arrives 30 ms after each tick of `02F82400`, the
-awake-time counter. A counter paired with an unpredictable value is the shape
-of a rolling code, and the counter is what stops one being replayed.
+the bike is awake -- and while the bike is unlocked it arrives 30 ms after each
+tick of `02F82400`. A counter paired with an unpredictable value is the shape
+of a rolling code, and the counter is what stops one being replayed. The
+pairing is not a dependency, though: during the IoT-triggered wakes above the
+nonce ran 39 times with `02F82400` absent from the bus. What the two share is
+an owner, the IoT module (component 2 above).
 
 `MEULK` produces a fixed five-second exchange on the same channel, identical in
 structure in both corpora apart from the challenge:
@@ -282,7 +359,9 @@ form: **the tracker's battery fields do not tell you the pack is fitted.**
 ### Cold boot polls the whole bus
 
 Reconnecting the pack runs a fixed sweep that no earlier recording had caught,
-because no earlier recording contained a power-up. It is worth more than the
+because no earlier recording contained a power-up. The reboot session later
+showed the same sweep run by an IoT `REBOOT` alone, so it is the tracker's
+start-up enumeration; see "An IoT reboot wakes the bus". It is worth more than the
 removal itself: the session logged **121 identifiers against 94-98** in every
 previous session, and 23 of those had never been seen at all. All 23 belong to
 this sweep.
@@ -321,8 +400,8 @@ answered within 50 ms; 7 never are:**
 
 | Request | `AA BB` | Sweep | Polls | |
 |---|---|---|---|---|
-| `02519500`, `02519501` | `95 00`, `95 01` | pack restore | 6 per restore | Identity channel of a component never otherwise seen |
-| `13B16001` | `60 01` | pack restore | 6 per restore | Same `PP` = `13` as the HubLock |
+| `02519500`, `02519501` | `95 00`, `95 01` | pack restore, IoT reboot | 6 per restore, 6 per reboot | Identity channel of a component never otherwise seen |
+| `13B16001` | `60 01` | pack restore, IoT reboot | 6 per restore, 6 per reboot | Same `PP` = `13` as the HubLock |
 | `02213600`, `02213601` | `36 00`, `36 01` | unlock wake | 1 each | Component 3's live channel |
 | `02498601`, `02498602` | `86 01`, `86 02` | unlock wake | 1 each | `AA` = `86` broadcasts `02488600` but answers nothing |
 
@@ -356,9 +435,9 @@ and 2, and any claim about `AA` = `60` or `64` from it carries that caveat.
 | `36 04` | `04FF3604` | 30 ms, the fastest message on the bus. **Still the most valuable unknown**, but no longer a mystery in shape: two 16-bit analogue channels idling at 4.47 and 3.05 with no correlation between them, plus the constant 200 and a flag. Not a lamp message. It needs a ride -- see `signals.toml`. |
 | `10 00`, `10 01` | `03FF1000`, `03FF1001` | The 105 ms heartbeat. Bytes 1-7 have never varied, across 83,259 frames and five sessions; bit `0x08` of byte 0 is clear for the first two seconds after a cold boot and set thereafter -- see `Heartbeat_1000.SystemReady`. `AA` = `10` fits no channel pattern, so it looks like a broadcast. |
 | `26 05` | `02FF2605` | 1 Hz. Bytes 0-4 are always `00 00 06 09 07`. Byte 7 is a rolling 0-9 sequence counter, one step per second. Bytes 5-6 change slowly and inconsistently -- byte 6 held for 47 s in one session and 20 s in another -- so they are not a tens digit and are not decoded. |
-| `16 03` | `03FF1603` | A value within 0.2 % of the pack voltage, constant for a whole session at 105 ms. A reading latched at wake would look like this. See `signals.toml` for the test that would disprove that. |
+| `16 03` | `03FF1603` | A value within 0.3 % of the pack voltage at 105 ms, quantised in ~16.6 mV steps, that changes only at component 1's power-up: it re-latched at three of the four pack restores and held through three IoT reboots. A coarse supply reading taken at boot. The offset to the BMS figure is 68-140 mV and not fixed. See `signals.toml`. |
 | `46 16`, `46 18` | `05124616`, `05124618` | BMS parameters. `4616` is a constant 12486. `4618` falls across sessions (3861, 3603-3719, 3540) but not monotonically within one. Undecoded. |
-| `86 xx`, `B0 28`, `B6 06`, `27 04`, `40 xx` | `02488600`, `1FF8B028`, `0260B606`, `02FF2704`, `05FF4000` | Constant payloads, mostly zero. A constant carries no information, so there is nothing to fit until something moves them. |
+| `86 xx`, `B0 28`, `B6 06`, `27 04`, `40 xx`, `A6 04` | `02488600`, `1FF8B028`, `0260B606`, `02FF2704`, `05FF4000`, `0258A604` | Constant payloads, mostly zero. A constant carries no information, so there is nothing to fit until something moves them. `0258A604` appeared only in the reboot session, 15 all-zero frames inside the reboot wakes. |
 
 ## What the identifier fields look like
 
@@ -369,15 +448,18 @@ Across all four corpora, unchanged from the previous measurement:
   field. **This corrects an earlier note that it only reached 0x08.** The
   battery-removal session added 24 identifiers and no new `PP`, which is what
   a five-bit field that is already full looks like.
-- `TT` takes `12 18 19 20 21 29 40 41 47 48 49 51 60 B1 B7 F8 F9 FF` -- 18
-  values, four of them new at cold boot (`41`, `49`, `51`, `B1`). `FF` appears
-  only on periodic status messages, never on a command, so `FF` looks like
-  "unsolicited report".
-- `AA` takes 22 values, `BB` takes 20. The new `AA` values are `60`, `75`,
-  `86` and `95`, all from the cold-boot sweep.
+- `TT` takes `12 18 19 20 21 29 40 41 47 48 49 51 58 60 B1 B7 F8 F9 FF` -- 19
+  values, four of them new at cold boot (`41`, `49`, `51`, `B1`) and one
+  (`58`) seen only in the reboot session. `FF` appears only on periodic status
+  messages, never on a command, so `FF` looks like "unsolicited report".
+- `AA` takes 23 values, `BB` takes 20. The new `AA` values are `60`, `75`,
+  `86` and `95` from the cold-boot sweep, and `A6` from the reboot session.
 
-These counts are over the whole corpus: 122 identifiers across five session
-directories.
+These counts are over the whole corpus: 123 identifiers across ten session
+directories (nine of 7 September and the 4 September legacy set). Sessions 6
+and 7 add nothing: 6 contains no valid command (a malformed `GTRTO` that was
+never acknowledged) and is a pure locked baseline of five identifiers; 7 sent
+three `GTECC`s to a locked bike and shows three identifiers.
 
 The nibble hypothesis, in its original form, is dead: it looked promising while
 the low nibble of `AA` was `6` for the three then-confirmed components (`36`,
@@ -422,6 +504,14 @@ Watch for one false positive: a monotonic counter is disjoint between any two
 time intervals. There are **four** such counters (see above), not one, and all
 four surface every time.
 
+And a second caution, learned from the temperatures: **the console's
+`<ECU Info>` is a cached copy, refreshed by the tracker's own polls at unlock.**
+Its cell temperatures changed only in the first report after a `05124615`
+reply, and to that reply's values. Comparing a cached field in time against a
+live frame produced a wrong "no byte is the cell maximum" and was withdrawn.
+Fit against `GTFRI`'s directly measured fields (pack voltage, current, SOC) or
+against the bus itself; treat `<ECU Info>` as evidence of what was last polled.
+
 **4. Cut power and watch the boot.** New, and it pays better than expected.
 A cold boot makes the master interrogate every node it knows about, so one
 power cycle reveals identifiers that months of idling never would -- 23 of
@@ -459,8 +549,14 @@ what the IoT module believes rather than what the hardware did.
    reading task, not a recording task, and it would settle which of components
    1 and 3 is the ECU and which is the speed panel.
 6. **Find something that still measures the deep-sleep threshold.** The
-   `05FF4400` method is withdrawn (see above); `03FF1400` resets too and may
-   serve instead, but its reset condition has not been established.
+   `05FF4400` value is a frame count and is withdrawn as a clock; but its
+   reset brackets a BMS sleep timer between 495 and 640 s (see above). Lock,
+   wait a chosen interval, unlock, and read whether the count restarts. Two or
+   three intervals would pin it. `03FF1400`'s reset is now known to be pack
+   power, so it cannot serve.
+10. **Unlock, `REBOOT`, unlock, in one recording.** That catches `02F82400`
+   resetting on tape instead of inferring it, and settles whether component 2
+   is the IoT module.
 7. **Disconnection.** With one component unplugged, the traffic that stops
    names its address. Bench only.
 8. **Reconnect the HubLock.** It has been off the bike since the 7 September

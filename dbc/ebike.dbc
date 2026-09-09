@@ -72,10 +72,10 @@ BO_ 2248099332 BmsCellVoltages_9_12: 8 Vector__XXX
 BO_ 2248099333 BmsCellVoltage_13: 8 Vector__XXX
  SG_ Cell13 : 0|16@1+ (1,0) [0|0] "mV" Vector__XXX
 
-BO_ 2248099334 BmsTemperatures_A: 3 Vector__XXX
- SG_ Temp3 : 23|8@0+ (1,0) [0|0] "degC" Vector__XXX
- SG_ Temp2 : 15|8@0+ (1,0) [0|0] "degC" Vector__XXX
- SG_ Temp1 : 7|8@0+ (1,0) [0|0] "degC" Vector__XXX
+BO_ 2248099334 BmsCellTemperatures: 3 Vector__XXX
+ SG_ CellTemp3 : 23|8@0+ (1,0) [0|0] "degC" Vector__XXX
+ SG_ CellTemp2 : 15|8@0+ (1,0) [0|0] "degC" Vector__XXX
+ SG_ CellTemp1 : 7|8@0+ (1,0) [0|0] "degC" Vector__XXX
 
 BO_ 2248099335 BmsTemperatures_B: 3 Vector__XXX
  SG_ Temp6 : 23|8@0+ (1,0) [0|0] "degC" Vector__XXX
@@ -119,9 +119,9 @@ BO_ 2232567301 BmsCellVoltage_13_Polled: 8 Vector__XXX
  SG_ Cell13 : 0|16@1+ (1,0) [0|0] "mV" Vector__XXX
 
 BO_ 2232567302 BmsTemperatures_A_Polled: 3 Vector__XXX
- SG_ Temp3 : 23|8@0+ (1,0) [0|0] "degC" Vector__XXX
- SG_ Temp2 : 15|8@0+ (1,0) [0|0] "degC" Vector__XXX
- SG_ Temp1 : 7|8@0+ (1,0) [0|0] "degC" Vector__XXX
+ SG_ CellTemp3 : 23|8@0+ (1,0) [0|0] "degC" Vector__XXX
+ SG_ CellTemp2 : 15|8@0+ (1,0) [0|0] "degC" Vector__XXX
+ SG_ CellTemp1 : 7|8@0+ (1,0) [0|0] "degC" Vector__XXX
 
 BO_ 2232567303 BmsTemperatures_B_Polled: 3 Vector__XXX
  SG_ Temp6 : 23|8@0+ (1,0) [0|0] "degC" Vector__XXX
@@ -238,7 +238,17 @@ disagreements all being frames inside a transition. It is 2 throughout the
 
 WHY IT MATTERS BEYOND THIS MESSAGE. Unlocking the bike wakes the bus: 5
 identifiers become 94. This byte is that state, published at a lamp's address,
-which is why the headlight appeared to switch on by itself after UNLOCK.";
+which is why the headlight appeared to switch on by itself after UNLOCK.
+
+CORRECTION -- this byte and 02181606 byte 0 are NOT the same fact. Two
+recordings show the bus woken without an UNLOCK: the reboot session, where
+each of three IoT REBOOT commands woke ~65 identifiers for about 5 s, and the
+190 s after the last pack restore in the battery-removal session. In both,
+02181606 byte 0 reads 1 (its full awake payload) while this byte stays 2 in
+every frame, and the console reports the bike locked. So 02181606 byte 0 says
+component 1 (AA=16) is awake; this byte says component 3 (AA=36) is awake,
+which so far has happened only on UNLOCK. 04FF3604 never joins those
+IoT-triggered wakes either, which puts it with this byte at component 3.";
 CM_ BO_ 2182616582 "[confirmed] The rear light. Same method as the headlight: RLONEN at 1788785392.364 and
 RLOFF at 1788785412.125, with this message changing 0.76 s and 0.40 s later,
 and nothing else changing in either window.";
@@ -292,9 +302,33 @@ CM_ SG_ 2182616582 BusAwake "[confirmed] Byte 0. 1 = the bike is awake, 0 = asle
 Agrees with the HubLock's own state on 13B76400 in 99/100 and 115/120 frames,
 and is 0 throughout the 4 September corpus, which is a bike that was never
 unlocked. It is 0 through the RLONEN window of the 7 September session too,
-while byte 4 turns the lamp on -- which is what separates the two signals.";
+while byte 4 turns the lamp on -- which is what separates the two signals.
+
+CORRECTION -- it is \"component 1 awake\", not \"unlocked\". In the reboot
+session each IoT REBOOT woke the bus for about 5 s with the bike locked, and
+this byte read 1 in 18 of 30 frames; the same happened for 190 s after the
+last pack restore in the battery-removal session (32 of 51 frames before the
+UNLOCK). 02203606 byte 0 stayed at 2 (asleep) in every one of those frames, and
++RESP:GTFRI reported ECU Lock State = 1 throughout. The agreement with the
+lock recorded above is real but only because every wake in those sessions was
+an unlock. See nodes.md, \"An IoT reboot wakes the bus\".
+
+CAUTION on byte 4 in that state: the same frames carry byte 4 = 1 and byte 2 =
+25 -- the whole payload is the awake payload, 0100190001030200 -- while GTFRI
+reports Rear Light Status = 0. Whether the lamp was physically lit during those
+wakes was not observed. RearLightOn stays confirmed on the commanded evidence
+above; this is a note that its value during an IoT-triggered wake is untested.";
 CM_ BO_ 2478269440 "[confirmed] The lock (immobiliser) reporting its state. A single-byte message, and the only
 one on the bus with priority 0x13.
+
+NOT PERIODIC. This carried cycle_time_ms = 280 and that was misleading: 280 ms
+is the spacing inside a burst, not a cycle. Over the two sessions where the
+HubLock was fitted it sent about 20 frames (5.3 s) after each UNLOCK and three
+bursts of three frames, 2.8 s apart, after each LOCK, and nothing in between --
+29 frames in a 7073 s session. It is absent from the 4 September corpus, which
+contains no lock event. So an inventory of a sleeping bus does not show it, and
+its absence from a short recording says nothing about whether the HubLock is
+fitted; only a lock event does.
 
 Identified across two independent sessions by driving UNLOCK and LOCK remotely
 and watching which byte tracked the resulting state. Method: build the lock
@@ -410,32 +444,57 @@ CM_ BO_ 2248099333 "[confirmed] BMS cell voltage, cell 13, then padding. This pa
 frame of the series carries one value and six zero bytes -- which is how the
 cell count was established.";
 CM_ SG_ 2248099333 Cell13 "[confirmed] Little-endian uint16 in mV. Bytes 2-7 are always zero: only 13 cells.";
-CM_ BO_ 2248099334 "[probable] BMS temperatures. Payload 1C1C1C reads as 28, 28, 28 which is a plausible cell
-temperature in degrees Celsius, and the same byte string is relayed in
-+RESP:GTBMI immediately after the cell voltage frames. Which physical sensor
-each byte is has not been established: <ECU Info> field 12 lists cell maximum,
-cell minimum, MOS and \"other\" temperatures, and there are more of those than
-there are bytes here.
+CM_ BO_ 2248099334 "[confirmed] BMS cell temperatures, three sensors. Was BmsTemperatures_A. Payload 1C1C1C
+reads as 28, 28, 28 degC, and the same byte string is relayed in +RESP:GTBMI
+immediately after the cell voltage frames. That these three are the CELL
+sensors, as opposed to the three in 05FF4607, rests on 05124615 -- see the
+correction below.
 
-DO NOT read these six bytes as \"the cell temperatures\", and in particular do
-not take their maximum as the pack's cell maximum. Across the three
-7 September sessions <ECU Info>'s Cell Temperature Max changes within a
-session -- 29,29,28,28,28 in the first, 28,28,28,29,29,29 in the second --
-while all six bytes of 05FF4606 and 05FF4607 hold still. No byte of either
-frame is the cell maximum. See 05FF4607.Temp5 for the one sensor that can be
-ruled out positively.
+CORRECTION -- WITHDRAWN: the earlier note here said no byte of this frame or
+05FF4607 could be the cell maximum, because <ECU Info>'s Cell Temperature Max
+changed within a session while all six bytes held still. Both halves of that
+argument fail. The bytes do move (05FF4607 byte 1 toggles 27/28 within
+session 2, byte 0 toggles 28/29 within session 1). And <ECU Info>'s
+temperatures are a CACHED COPY, not a live reading: in sessions 1, 2 and the
+battery-removal session the console's cell max/min changed only in the first
+report after a 05124615 poll reply, and to exactly that reply's values
+(28/28 after 1C011C01; 29/28 after 1D011C03; 30/29 after 1E011D03). Comparing
+a cached copy in time against a live frame proves nothing either way.
 
-The whole corpus spans 27 to 29 degC, so there is not enough range here to
-assign the bytes at all. What would settle it: warm one part of the pack --
-a charge cycle heats the MOS, a discharge heats the cells -- and see which
-bytes move together.";
-CM_ SG_ 2248099334 Temp3 "[probable] 0x1C = 28 degC. Sensor identity unknown.";
-CM_ SG_ 2248099334 Temp2 "[probable] 0x1C = 28 degC. Sensor identity unknown.";
-CM_ SG_ 2248099334 Temp1 "[probable] 0x1C = 28 degC. Sensor identity unknown; the scale may also have an offset.";
+WHAT THE CORPUS DOES SHOW: these three bytes are the cell temperature sensors.
+05124615 reports a maximum and a minimum each with a 1-based sensor index, and
+in all 12 frames on record across five sessions the indexed byte of THIS frame
+carries exactly the reported value -- 29 29 28 with max 29 @ 1 and min 28 @ 3;
+30 30 29 with 30 @ 1 and 29 @ 3; 30 30 30 with 30 @ 1 and 30 @ 1. The indices
+never point into 05FF4607, whose bytes 1 and 2 sit below the reported cell
+minimum. That is the same internal-consistency test that confirmed 05124614
+against the cell voltages, so the cell-sensor reading is confirmed; which
+physical position each of the three sensors occupies in the pack is not.
+
+The whole corpus spans 27 to 30 degC. To go further, warm one part of the
+pack -- a charge cycle heats the MOS, a discharge heats the cells -- and see
+which bytes move together.";
+CM_ SG_ 2248099334 CellTemp3 "[confirmed] Was Temp3. Cell sensor 3: 05124615 names it (index 3) as the cell minimum
+whenever the minimum differs from the maximum -- 28 in sessions 2 and 3, 29 in
+the battery-removal session -- and the value matches every time.";
+CM_ SG_ 2248099334 CellTemp2 "[probable] Was Temp2. Cell sensor 2 by position between the two that 05124615 indexes.
+Never itself named as max or min in the corpus, so probable rather than
+confirmed.";
+CM_ SG_ 2248099334 CellTemp1 "[confirmed] Was Temp1. Cell sensor 1: 05124615 names it (index 1) as the sensor holding
+the cell maximum in all 12 polled frames, and the value matches every time
+(28, 29, 30 across sessions). Confirmed by internal consistency, as 05124614.
+Scale 1 degC with no offset is inferred from the same match; an offset would
+have to be shared by both frames.";
 CM_ BO_ 2248099335 "[probable] More BMS temperatures: 1D1B1C reads as 29, 27, 28 degC, and is likewise
 relayed verbatim in +RESP:GTBMI. The spread across the two frames is 27-29 degC
 on a stationary bike at room temperature, which is what makes the reading
-plausible.";
+plausible.
+
+These are the NON-cell sensors. 05124615's max/min indices point into
+05FF4606 in all 12 frames and never here, and bytes 1 and 2 of this frame sit
+at or below the reported cell minimum. Byte 0 equals <ECU Info>'s MOS
+temperature in every session where that field had been freshly refreshed by a
+poll (sessions 2, 3, 4 and 9: 29, 29, 30, 30). See Temp4.";
 CM_ SG_ 2248099335 Temp6 "[probable] 0x1C = 28 degC. Sensor identity unknown.";
 CM_ SG_ 2248099335 Temp5 "[probable] 0x1B = 27 degC, and the one temperature byte whose identity can be settled by
 elimination: it is NOT a cell sensor.
@@ -447,8 +506,20 @@ count it as a cell. It is not the MOS or \"other\" temperature either -- both
 are reported as 28 or 29 and this byte matched neither in any of the 21
 comparable reports.
 
+UPDATE. The byte does move: 27 or 28 within session 2, 28 in session 3, 29 in
+the battery-removal, unlock/lock and set-speed sessions. It stays at or below
+the cell minimum that 05124615 reports at the time (28, 28, 29, 30, 30), so
+the \"not a cell\" argument survives the wider corpus. The MOS comparison above
+was made against a cached console value; the fresh comparison is that byte 0
+of this frame, not this byte, tracks mos_temp_c.
+
 Ambient, board or inlet temperature are what is left. Untested.";
-CM_ SG_ 2248099335 Temp4 "[probable] 0x1D = 29 degC. Sensor identity unknown.";
+CM_ SG_ 2248099335 Temp4 "[probable] 0x1D = 29 degC. Probably the MOS temperature: matches <ECU Info> mos_temp_c in
+sessions 2, 3, 4 and 9 (29, 29, 30, 30). Session 1 disagrees (byte 29, console
+28), but the console's copy there predates the session's only poll, so it is
+stale -- see the CORRECTION on 05FF4606 for why the console's temperatures
+cannot be read as live. Not confirmed because a constant matching a constant
+over 29-30 degC is weak; a charge cycle would move the MOS and settle it.";
 CM_ BO_ 2248099344 "[confirmed] The BMS reporting the pack terminals: voltage in bytes 0-3, current in bytes
 4-7, both big-endian 32-bit, both at 273 ms. This was the \"273 ms, bytes 3 and
 7 varying, at the BMS address, not part of the GTBMI relay\" entry in nodes.md.
@@ -558,13 +629,13 @@ CM_ SG_ 2232567300 Cell10 "[confirmed] As 05FF4604.Cell10.";
 CM_ SG_ 2232567300 Cell9 "[confirmed] As 05FF4604.Cell9.";
 CM_ BO_ 2232567301 "[confirmed] Reply to 02294605. Cell 13, as 05FF4605. Bytes 2-7 are padding.";
 CM_ SG_ 2232567301 Cell13 "[confirmed] As 05FF4605.Cell13.";
-CM_ BO_ 2232567302 "[probable] Reply to 02294606. As 05FF4606: 1E1E1D reads as 30, 30, 29 degC. Which sensor
-each byte is remains unassigned -- see 05FF4606 for why, and for the warning
-against reading their maximum as the pack's cell maximum.";
-CM_ SG_ 2232567302 Temp3 "[probable] As 05FF4606.Temp3.";
-CM_ SG_ 2232567302 Temp2 "[probable] As 05FF4606.Temp2.";
-CM_ SG_ 2232567302 Temp1 "[probable] As 05FF4606.Temp1.";
-CM_ BO_ 2232567303 "[probable] Reply to 02294607. As 05FF4607: 1E1D1D reads as 30, 29, 29 degC.";
+CM_ BO_ 2232567302 "[probable] Reply to 02294606. As 05FF4606: 1E1E1D reads as 30, 30, 29 degC -- the three
+cell temperature sensors. See 05FF4606.";
+CM_ SG_ 2232567302 CellTemp3 "[confirmed] As 05FF4606.CellTemp3.";
+CM_ SG_ 2232567302 CellTemp2 "[probable] As 05FF4606.CellTemp2.";
+CM_ SG_ 2232567302 CellTemp1 "[confirmed] As 05FF4606.CellTemp1; the polled frames carry the same bytes as the unsolicited frame beside them.";
+CM_ BO_ 2232567303 "[probable] Reply to 02294607. As 05FF4607: 1E1D1D reads as 30, 29, 29 degC -- the
+non-cell sensors, byte 0 probably the MOS. See 05FF4607.";
 CM_ SG_ 2232567303 Temp6 "[probable] As 05FF4607.Temp6.";
 CM_ SG_ 2232567303 Temp5 "[probable] As 05FF4607.Temp5.";
 CM_ SG_ 2232567303 Temp4 "[probable] As 05FF4607.Temp4.";
@@ -677,7 +748,7 @@ CM_ SG_ 2248099328 CellCount "[probable] Byte 0 = 13. Agrees with the cell count
 number of cell voltage values on the bus. Still \"probable\" rather than
 confirmed because a constant agreeing with a constant is weak: a pack with a
 different cell count would settle it, and there is only one pack.";
-CM_ BO_ 2232567317 "[probable] Highest and lowest temperature with sensor indices, by exact analogy with
+CM_ BO_ 2232567317 "[confirmed] Highest and lowest temperature with sensor indices, by exact analogy with
 05124614's treatment of the cell voltages. Returned on request (02294615).
 
   4 September onwards, s1     1C011C0100xx   28 @ 1, 28 @ 1
@@ -688,18 +759,39 @@ and third sessions (29 and 28) and in three of the five reports of the first.
 The structural parallel with 05124614 -- value, index, value, index -- is what
 makes the layout probable rather than a guess.
 
-Not confirmed, and it will not be from this corpus: every temperature anywhere
-in it is 27, 28 or 29 degC, so a field that reads 28 agrees with almost
-anything. The last two bytes vary between 0x0010/0x00FF and 0x0100/0x01FF and
-are not decoded.
+CONFIRMED by internal consistency, the same way as 05124614. In all 12 frames
+across five sessions, byte 0 equals the 05FF4606 byte that byte 1 indexes
+(1-based) and byte 2 equals the 05FF4606 byte that byte 3 indexes:
+
+  1C011C01  28 @ 1, 28 @ 1   05FF4606 = 1C 1C 1C
+  1D011C03  29 @ 1, 28 @ 3   05FF4606 = 1D 1D 1C
+  1E011D03  30 @ 1, 29 @ 3   05FF4606 = 1E 1E 1D
+  1E011E01  30 @ 1, 30 @ 1   05FF4606 = 1E 1E 1E
+
+Four distinct payloads, values moving between sessions, indices moving too.
+The indices never point into 05FF4607, which is what establishes 05FF4606 as
+the cell sensors and 05FF4607 as the others.
+
+It is also the SOURCE of <ECU Info>'s Cell Temperature Max/Min. The console's
+values change only in the first report after this frame is polled, and to this
+frame's values, in every session where they changed at all (1, 2 and 4). The
+console holds a cached copy refreshed by this poll -- see the correction on
+05FF4606 for the wrong reading that came from treating it as live.
+
+The last two bytes vary between 0x0010/0x00FF and 0x0100/0x01FF and are not
+decoded.
 
 Note the sensor indices here are 1-based, unlike the 0-based cell indices in
 05124614. That is not a typo: index 1 picks out the byte that carries the
 matching value in 05FF4606 only under 1-based numbering.";
-CM_ SG_ 2232567317 MinTempIndex "[hypothesis] Byte 3. 1 in the first session, 3 in the other two. Moves, which is why it looks like an index.";
-CM_ SG_ 2232567317 MinTemp "[probable] Byte 2. 28 degC in all three sessions, matching Cell Temperature Min.";
-CM_ SG_ 2232567317 MaxTempIndex "[hypothesis] Byte 1. Always 1. A sensor index by analogy with 05124614; nothing has moved it.";
-CM_ SG_ 2232567317 MaxTemp "[probable] Byte 0. 28 degC in the first session, 29 in the other two, matching Cell Temperature Max.";
+CM_ SG_ 2232567317 MinTempIndex "[confirmed] Byte 3, 1-based index into 05FF4606. Reads 1 when all three cell sensors agree
+and 3 when they do not, and 05FF4606 byte 2 was in fact the minimum each time
+it read 3.";
+CM_ SG_ 2232567317 MinTemp "[confirmed] Byte 2. Equals 05FF4606's byte at MinTempIndex in 12/12 frames: 28, 29, 30.";
+CM_ SG_ 2232567317 MaxTempIndex "[confirmed] Byte 1, 1-based index into 05FF4606. Always 1 so far, and 05FF4606 byte 0 was
+in fact a maximum in all 12 frames. Confirmed jointly with MinTempIndex, which
+does move and points correctly each time.";
+CM_ SG_ 2232567317 MaxTemp "[confirmed] Byte 0. Equals 05FF4606's byte at MaxTempIndex in 12/12 frames: 28, 29, 30 across sessions.";
 CM_ BO_ 2214532352 "[confirmed] Reply to 02191500. 0x000000C3 = group 1 of <ECU Info> <Hardware Version>, verbatim.";
 CM_ SG_ 2214532352 HardwareVersion "[confirmed] Bytes 0-3 = 0x000000C3. Appears as the first group of the serial's hardware version.";
 CM_ BO_ 2214532353 "[confirmed] Reply to 02191501. 0x0000004A = group 1 of <ECU Info> <Firmware Version>, verbatim.";
@@ -834,7 +926,33 @@ clock at all; see BmsSequence_4400.
 It is also the non-volatile one. It ran 965 -> 969 -> 971 -> 980 -> 981 -> 987
 -> 992 -> 994 across the four sessions without a single reset, and the last
 step spans the four pack removals of the battery-removal session. 04FF3400
-resets at every one of them.";
+resets at every one of them.
+
+CORRECTION -- \"non-volatile\" is wrong. It read 994 at the end of the
+battery-removal session and 0 at the start of the unlock/lock session, running
+0-4 there and 5-11 in the set-speed session after it. The only thing recorded
+between 994 and 0 is the reboot session, in which the IoT module was rebooted
+three times by remote command. So this counter survives four pack removals and
+does not survive an IoT reboot. That is what a value held in RAM looks like
+when the RAM belongs to the one component with its own backup battery: the
+tracker kept running through every blackout (GTFRI reported 4.07 V on its
+backup cell) and its memory was never lost until it was told to restart.
+
+The plainest reading is that AA=24 is the IoT module's own channel, and by
+extension AA=26 (the nonce and the MEULK challenge, which the IoT module is
+the component that receives). See nodes.md, which had AA=24/26/27 down as a
+component whose channels did not line up.
+
+CORRECTION -- \"awake time\" is imprecise; it counts UNLOCKED time. In the two
+recordings where the bus was woken without an UNLOCK (the reboot session's
+three IoT reboots, and the 190 s after the last pack restore in the
+battery-removal session) this identifier did not appear at all, while ~65
+others did. It appears only after UNLOCK, and its first frame in the
+battery-removal session is 2.9 s after that session's UNLOCK.
+
+The reset was not observed directly -- no recording contains both 994 and 0
+-- so it is a strong inference, not a measurement. What would confirm it: an
+UNLOCK before and after a single REBOOT in one recording.";
 CM_ SG_ 2197300224 AwakeTime "[confirmed] Bytes 0-1, LITTLE-endian, 10 s per count. C503 reads as 0x03C5 = 965, and the
 five frames of session 1 run 965, 966, 967, 968, 969 at 10 s apart. Read
 big-endian the sequence would be 0xC503, 0xC603, ... jumping by 256 a step,
@@ -852,7 +970,19 @@ before, where 02F82400 was already at 965.
 
 Advanced by 1 over the 2402 s sleep between sessions 1 and 2 and by 1 over the
 961 s sleep between 2 and 3, against 240 and 96 ticks of wall clock. So it too
-counts awake time and not elapsed time.";
+counts awake time and not elapsed time.
+
+RESOLVED -- its reset condition, which nodes.md listed as unknown: pack power.
+It read 16 at the end of session 3, and 0 then 1 after the four pack removals
+of the battery-removal session; then 2 in the reboot session, 3-6 and 7-13 in
+the two sessions after that, with no reset across the three IoT REBOOTs. That
+is the mirror image of 02F82400, which survived the pack removals and reset
+across the reboots. Two awake-time counters, one in a pack-powered component
+(AA=14, component 1) and one in the IoT module.
+
+Like 02F82400 it did not run during the IoT-triggered wakes, except for a
+single frame (value 2) 3 s into the first reboot wake. One frame is not enough
+to say whether it ticks in that state.";
 CM_ SG_ 2214532096 AwakeTime "[confirmed] Bytes 0-3 big-endian, 10 s per count. 0x0000000A = 10. Runs 0-3 in session 1,
 4-11 in session 2, 12-16 in session 3, every step exactly +1, and skips the
 short sleep inside session 2 exactly as 02F82400 does.";
@@ -872,6 +1002,19 @@ What is true instead, over the whole corpus: the value equals the frame's
 index within the session, 0, 1, 2, ..., in all 37 frames of all four
 sessions, with no exception and no gap.
 
+CORRECTION -- \"frame index within the session\" is also wrong, or at least the
+\"within the session\" part is. The reboot session runs 12, 13, 14, 15, 16, 17,
+continuing from the battery-removal session's 11 across a 430 s gap and
+three IoT reboots. It steps by exactly +1 per frame everywhere, so \"counts
+frames\" stands; what resets it does not. Observed: it read 0 on the first
+frame after UNLOCK in sessions 1, 2, 3, 8 and 9, all of which followed a sleep
+of at least 640 s; it did NOT reset at the UNLOCK in the battery-removal
+session (8, with the BMS already awake from the pack restores), nor across a
+495 s sleep inside the reboot session, nor across any pack removal or IoT
+reboot. A BMS-side sleep timer somewhere between 495 and 640 s would fit all
+of that, and it is the only candidate left for measuring the deep-sleep
+threshold -- but that is one bracket from one pair of gaps, not a finding.
+
 CONSEQUENCE -- the deep-sleep threshold experiment recorded here is void. It
 was going to lock the bike, wait a measured interval, unlock, and read this
 field as elapsed time. It is a frame index, so it would have measured nothing.
@@ -880,8 +1023,10 @@ The 51 s / 947 s bracket that came from it should not be relied on.
 It stays \"probable\" rather than \"confirmed\" because \"counts frames\" and
 \"counts an event that happens once per frame\" cannot be told apart from the
 recordings. What is confirmed is the negative: it does not measure time.";
-CM_ SG_ 2248098816 Sequence "[probable] Bytes 0-3 big-endian. Value == frame index in 37 of 37 frames across four
-sessions: 0-4, 0-10, 0-8 and 0-11.
+CM_ SG_ 2248098816 Sequence "[probable] Bytes 0-3 big-endian. Steps by exactly +1 per frame in all 58 frames across
+seven sessions: 0-4, 0-10, 0-8, 0-11, then 12-17 (continuing from the 11),
+0-6 and 0-7. See the message comment for what is and is not known about the
+reset.
 
 It did not reset at any of the four pack removals in the battery-removal
 session, while every counter on the bike itself did. That is expected and is
@@ -902,6 +1047,15 @@ each tick of 02F82400, the awake-time counter, in every instance -- a counter
 paired with an unpredictable value is the shape of a rolling code, and a
 counter is exactly what stops one being replayed. The same address, AA=26,
 carries the challenge that MEULK produces (02472602).
+
+CORRECTION -- \"in every instance\" was true of the sessions then on record and
+is false in general. In the 190 s after the last pack restore in the
+battery-removal session this nonce was sent 28 times, and in the reboot
+session 11 times, with 02F82400 absent from the bus on both occasions. The
+pairing holds whenever the bike is unlocked; it is not a dependency. What the
+two do still share is an owner: 02F82400 turns out to reset on an IoT reboot
+(see AwakeTime_2400), so both AA=24 and AA=26 look like the IoT module's own
+traffic, which is the natural sender of an authentication challenge.
 
 Bytes 0-7 all vary, entropy 2.5 bits per byte over 7 frames, which is as high
 as 7 samples can show. Nothing in it correlates with anything measured.
@@ -987,7 +1141,18 @@ USE THIS MESSAGE AS THE WAKE DETECTOR. Its active runs bound the awake window
 better than anything else on the bus: they begin 2.1-2.6 s after each UNLOCK
 and end 0.3-0.8 s after each LOCK, over four unlocks and three locks. That is
 how the lock latency asymmetry was shown to be the bus waking rather than a
-latch -- see 13B76400.Unlocked.";
+latch -- see 13B76400.Unlocked.
+
+UPDATE over ten unlocks and eight locks in seven sessions: runs begin 2.05 to
+3.20 s after UNLOCK and end 0.26 to 0.81 s after LOCK. The one 3.20 s start is
+the first unlock of the HubLock-disconnected session. Layout is identical in
+all seven sessions (9,891 frames): byte 1 mean 4.46-4.53, byte 3 mean
+3.04-3.07, r = 0.05-0.13.
+
+It is specifically an UNLOCK detector, not a bus-activity detector. The bus can
+be woken without an unlock -- an IoT REBOOT does it, and so does a pack
+restore -- and this message does not appear in either case while ~65 others
+do. See nodes.md, \"An IoT reboot wakes the bus\".";
 CM_ SG_ 2231318020 Constant200 "[hypothesis] Bytes 4-5. Holds 200 (0xC8) in all but the first second after a wake, where it
 is 0, and in a 90 ms blip during a re-unlock. Named for what it is rather than
 what it might mean. A limit, a scale or a commanded setpoint would all look
@@ -1020,11 +1185,27 @@ rather than a light.
 WHAT WOULD DISPROVE \"latched at wake\": unlock, wait for the value, then load
 the pack hard enough to move 05FF4610 by more than 100 mV, and see whether
 this follows. If it does, it is a filtered live reading and the constancy was
-only a symptom of a very quiet bench.";
-CM_ SG_ 2214532611 VoltageLike "[hypothesis] Bytes 0-3 big-endian. Three values, one per session, all within 0.2 % of the
-pack voltage at the time. The unit is written as mV to make the comparison
-easy to run; it is a hypothesis, not a measurement, and one value per session
-is three data points.";
+only a symptom of a very quiet bench.
+
+UPDATE from four more sessions. Not constant per session after all: in the
+battery-removal session it re-latched at pack restores 1, 3 and 4 (53369 ->
+53352 -> 53335) and did not change at the UNLOCK, then held 53335 through the
+reboot session's three IoT reboots. So it latches on component 1's power-up,
+not on wake -- consistent with AA=14's awake counter also resetting on pack
+power. Two more things the wider corpus shows:
+
+  * The values are quantised. All seven distinct values on record differ by
+    multiples of about 16.6 mV (diffs 33, 17, 17, 99, 50, 17), which is an
+    ADC step, so this is component 1's own measurement of its supply and not
+    a relay of the BMS figure.
+  * The offset to the BMS pack voltage is not fixed: 68 to 140 mV across the
+    seven sessions, and the unlock/lock session's value (53352) is ABOVE the
+    reboot session's (53335) while the pack fell 45 mV between them. So \"pack
+    voltage minus a constant\" does not describe it; \"a coarse supply reading
+    taken at power-up\" does.";
+CM_ SG_ 2214532611 VoltageLike "[hypothesis] Bytes 0-3 big-endian. Seven distinct values across seven sessions, all within 0.3 % of the
+pack voltage at the time, quantised in ~16.6 mV steps. The unit is written as
+mV to make the comparison easy to run; it is a hypothesis, not a measurement.";
 CM_ BO_ 2214531072 "[probable] A heartbeat. Every 105 ms, payload 0840112200000001. It runs while the bus
 sleeps, so it is one of the five identifiers a locked bike still sends. Node
 field 10->00 appears nowhere else.
@@ -1060,7 +1241,6 @@ status bit rather than a boot flag. Nothing in the corpus shows this, but the
 corpus contains only four boots.";
 BA_DEF_ BO_  "GenMsgCycleTime" INT 0 65535;
 BA_DEF_DEF_  "GenMsgCycleTime" 0;
-BA_ "GenMsgCycleTime" BO_ 2478269440 280;
 BA_ "GenMsgCycleTime" BO_ 2214532608 1000;
 BA_ "GenMsgCycleTime" BO_ 2248099330 1044;
 BA_ "GenMsgCycleTime" BO_ 2248099331 1044;

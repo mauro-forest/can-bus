@@ -98,13 +98,13 @@ local f_bmscellvoltages_9_12_cell11 = ProtoField.uint32("ebike.bmscellvoltages_9
 local f_bmscellvoltages_9_12_cell12 = ProtoField.uint32("ebike.bmscellvoltages_9_12.cell12", "Cell12", base.DEC)
 -- BmsCellVoltage_13.Cell13: Little-endian uint16 in mV. Bytes 2-7 are always zero: only 13 cells.
 local f_bmscellvoltage_13_cell13 = ProtoField.uint32("ebike.bmscellvoltage_13.cell13", "Cell13", base.DEC)
--- BmsTemperatures_A.Temp1: 0x1C = 28 degC. Sensor identity unknown; the scale may also have an offset.
-local f_bmstemperatures_a_temp1 = ProtoField.uint32("ebike.bmstemperatures_a.temp1", "Temp1", base.DEC)
--- BmsTemperatures_A.Temp2: 0x1C = 28 degC. Sensor identity unknown.
-local f_bmstemperatures_a_temp2 = ProtoField.uint32("ebike.bmstemperatures_a.temp2", "Temp2", base.DEC)
--- BmsTemperatures_A.Temp3: 0x1C = 28 degC. Sensor identity unknown.
-local f_bmstemperatures_a_temp3 = ProtoField.uint32("ebike.bmstemperatures_a.temp3", "Temp3", base.DEC)
--- BmsTemperatures_B.Temp4: 0x1D = 29 degC. Sensor identity unknown.
+-- BmsCellTemperatures.CellTemp1: Was Temp1. Cell sensor 1: 05124615 names it (index 1) as the sensor holding the cell maximum in 
+local f_bmscelltemperatures_celltemp1 = ProtoField.uint32("ebike.bmscelltemperatures.celltemp1", "CellTemp1", base.DEC)
+-- BmsCellTemperatures.CellTemp2: Was Temp2. Cell sensor 2 by position between the two that 05124615 indexes. Never itself named a
+local f_bmscelltemperatures_celltemp2 = ProtoField.uint32("ebike.bmscelltemperatures.celltemp2", "CellTemp2", base.DEC)
+-- BmsCellTemperatures.CellTemp3: Was Temp3. Cell sensor 3: 05124615 names it (index 3) as the cell minimum whenever the minimum d
+local f_bmscelltemperatures_celltemp3 = ProtoField.uint32("ebike.bmscelltemperatures.celltemp3", "CellTemp3", base.DEC)
+-- BmsTemperatures_B.Temp4: 0x1D = 29 degC. Probably the MOS temperature: matches <ECU Info> mos_temp_c in sessions 2, 3, 4 
 local f_bmstemperatures_b_temp4 = ProtoField.uint32("ebike.bmstemperatures_b.temp4", "Temp4", base.DEC)
 -- BmsTemperatures_B.Temp5: 0x1B = 27 degC, and the one temperature byte whose identity can be settled by elimination: it is
 local f_bmstemperatures_b_temp5 = ProtoField.uint32("ebike.bmstemperatures_b.temp5", "Temp5", base.DEC)
@@ -150,12 +150,12 @@ local f_bmscellvoltages_9_12_polled_cell11 = ProtoField.uint32("ebike.bmscellvol
 local f_bmscellvoltages_9_12_polled_cell12 = ProtoField.uint32("ebike.bmscellvoltages_9_12_polled.cell12", "Cell12", base.DEC)
 -- BmsCellVoltage_13_Polled.Cell13: As 05FF4605.Cell13.
 local f_bmscellvoltage_13_polled_cell13 = ProtoField.uint32("ebike.bmscellvoltage_13_polled.cell13", "Cell13", base.DEC)
--- BmsTemperatures_A_Polled.Temp1: As 05FF4606.Temp1.
-local f_bmstemperatures_a_polled_temp1 = ProtoField.uint32("ebike.bmstemperatures_a_polled.temp1", "Temp1", base.DEC)
--- BmsTemperatures_A_Polled.Temp2: As 05FF4606.Temp2.
-local f_bmstemperatures_a_polled_temp2 = ProtoField.uint32("ebike.bmstemperatures_a_polled.temp2", "Temp2", base.DEC)
--- BmsTemperatures_A_Polled.Temp3: As 05FF4606.Temp3.
-local f_bmstemperatures_a_polled_temp3 = ProtoField.uint32("ebike.bmstemperatures_a_polled.temp3", "Temp3", base.DEC)
+-- BmsTemperatures_A_Polled.CellTemp1: As 05FF4606.CellTemp1; the polled frames carry the same bytes as the unsolicited frame beside th
+local f_bmstemperatures_a_polled_celltemp1 = ProtoField.uint32("ebike.bmstemperatures_a_polled.celltemp1", "CellTemp1", base.DEC)
+-- BmsTemperatures_A_Polled.CellTemp2: As 05FF4606.CellTemp2.
+local f_bmstemperatures_a_polled_celltemp2 = ProtoField.uint32("ebike.bmstemperatures_a_polled.celltemp2", "CellTemp2", base.DEC)
+-- BmsTemperatures_A_Polled.CellTemp3: As 05FF4606.CellTemp3.
+local f_bmstemperatures_a_polled_celltemp3 = ProtoField.uint32("ebike.bmstemperatures_a_polled.celltemp3", "CellTemp3", base.DEC)
 -- BmsTemperatures_B_Polled.Temp4: As 05FF4607.Temp4.
 local f_bmstemperatures_b_polled_temp4 = ProtoField.uint32("ebike.bmstemperatures_b_polled.temp4", "Temp4", base.DEC)
 -- BmsTemperatures_B_Polled.Temp5: As 05FF4607.Temp5.
@@ -188,13 +188,13 @@ local f_bmscapacity_fullchargecapacity = ProtoField.uint32("ebike.bmscapacity.fu
 local f_bmscapacity_remainingcapacity = ProtoField.uint32("ebike.bmscapacity.remainingcapacity", "RemainingCapacity", base.DEC)
 -- BmsConfig.CellCount: Byte 0 = 13. Agrees with the cell count +RESP:GTBMI reports and with the number of cell voltage 
 local f_bmsconfig_cellcount = ProtoField.uint32("ebike.bmsconfig.cellcount", "CellCount", base.DEC)
--- BmsTempExtremes.MaxTemp: Byte 0. 28 degC in the first session, 29 in the other two, matching Cell Temperature Max.
+-- BmsTempExtremes.MaxTemp: Byte 0. Equals 05FF4606's byte at MaxTempIndex in 12/12 frames: 28, 29, 30 across sessions.
 local f_bmstempextremes_maxtemp = ProtoField.uint32("ebike.bmstempextremes.maxtemp", "MaxTemp", base.DEC)
--- BmsTempExtremes.MaxTempIndex: Byte 1. Always 1. A sensor index by analogy with 05124614; nothing has moved it.
+-- BmsTempExtremes.MaxTempIndex: Byte 1, 1-based index into 05FF4606. Always 1 so far, and 05FF4606 byte 0 was in fact a maximum 
 local f_bmstempextremes_maxtempindex = ProtoField.uint32("ebike.bmstempextremes.maxtempindex", "MaxTempIndex", base.DEC)
--- BmsTempExtremes.MinTemp: Byte 2. 28 degC in all three sessions, matching Cell Temperature Min.
+-- BmsTempExtremes.MinTemp: Byte 2. Equals 05FF4606's byte at MinTempIndex in 12/12 frames: 28, 29, 30.
 local f_bmstempextremes_mintemp = ProtoField.uint32("ebike.bmstempextremes.mintemp", "MinTemp", base.DEC)
--- BmsTempExtremes.MinTempIndex: Byte 3. 1 in the first session, 3 in the other two. Moves, which is why it looks like an index.
+-- BmsTempExtremes.MinTempIndex: Byte 3, 1-based index into 05FF4606. Reads 1 when all three cell sensors agree and 3 when they d
 local f_bmstempextremes_mintempindex = ProtoField.uint32("ebike.bmstempextremes.mintempindex", "MinTempIndex", base.DEC)
 -- Node15HardwareVersion.HardwareVersion: Bytes 0-3 = 0x000000C3. Appears as the first group of the serial's hardware version.
 local f_node15hardwareversion_hardwareversion = ProtoField.uint32("ebike.node15hardwareversion.hardwareversion", "HardwareVersion", base.DEC)
@@ -214,7 +214,7 @@ local f_uptime_3400_uptime = ProtoField.uint32("ebike.uptime_3400.uptime", "Upti
 local f_awaketime_2400_awaketime = ProtoField.uint32("ebike.awaketime_2400.awaketime", "AwakeTime", base.DEC)
 -- AwakeTime_1400.AwakeTime: Bytes 0-3 big-endian, 10 s per count. 0x0000000A = 10. Runs 0-3 in session 1, 4-11 in session 2,
 local f_awaketime_1400_awaketime = ProtoField.uint32("ebike.awaketime_1400.awaketime", "AwakeTime", base.DEC)
--- BmsSequence_4400.Sequence: Bytes 0-3 big-endian. Value == frame index in 37 of 37 frames across four sessions: 0-4, 0-10, 0
+-- BmsSequence_4400.Sequence: Bytes 0-3 big-endian. Steps by exactly +1 per frame in all 58 frames across seven sessions: 0-4,
 local f_bmssequence_4400_sequence = ProtoField.uint32("ebike.bmssequence_4400.sequence", "Sequence", base.DEC)
 -- Unknown_3604.AnalogueA: Bytes 0-1. Byte 0 has been zero in all 5892 frames recorded, so the width is a guess; 16 bits is
 local f_unknown_3604_analoguea = ProtoField.uint32("ebike.unknown_3604.analoguea", "AnalogueA", base.DEC)
@@ -222,7 +222,7 @@ local f_unknown_3604_analoguea = ProtoField.uint32("ebike.unknown_3604.analoguea
 local f_unknown_3604_analogueb = ProtoField.uint32("ebike.unknown_3604.analogueb", "AnalogueB", base.DEC)
 -- Unknown_3604.Constant200: Bytes 4-5. Holds 200 (0xC8) in all but the first second after a wake, where it is 0, and in a 90
 local f_unknown_3604_constant200 = ProtoField.uint32("ebike.unknown_3604.constant200", "Constant200", base.DEC)
--- Unknown_1603.VoltageLike: Bytes 0-3 big-endian. Three values, one per session, all within 0.2 % of the pack voltage at the
+-- Unknown_1603.VoltageLike: Bytes 0-3 big-endian. Seven distinct values across seven sessions, all within 0.3 % of the pack 
 local f_unknown_1603_voltagelike = ProtoField.uint32("ebike.unknown_1603.voltagelike", "VoltageLike", base.DEC)
 -- Heartbeat_1000.SystemReady: Bit 0x08 of byte 0. Clear for the first seconds after the pack is connected, then set, and it ne
 local f_heartbeat_1000_systemready = ProtoField.uint32("ebike.heartbeat_1000.systemready", "SystemReady", base.DEC)
@@ -249,9 +249,9 @@ ebike.fields = {
   f_bmscellvoltages_9_12_cell11,
   f_bmscellvoltages_9_12_cell12,
   f_bmscellvoltage_13_cell13,
-  f_bmstemperatures_a_temp1,
-  f_bmstemperatures_a_temp2,
-  f_bmstemperatures_a_temp3,
+  f_bmscelltemperatures_celltemp1,
+  f_bmscelltemperatures_celltemp2,
+  f_bmscelltemperatures_celltemp3,
   f_bmstemperatures_b_temp4,
   f_bmstemperatures_b_temp5,
   f_bmstemperatures_b_temp6,
@@ -275,9 +275,9 @@ ebike.fields = {
   f_bmscellvoltages_9_12_polled_cell11,
   f_bmscellvoltages_9_12_polled_cell12,
   f_bmscellvoltage_13_polled_cell13,
-  f_bmstemperatures_a_polled_temp1,
-  f_bmstemperatures_a_polled_temp2,
-  f_bmstemperatures_a_polled_temp3,
+  f_bmstemperatures_a_polled_celltemp1,
+  f_bmstemperatures_a_polled_celltemp2,
+  f_bmstemperatures_a_polled_celltemp3,
   f_bmstemperatures_b_polled_temp4,
   f_bmstemperatures_b_polled_temp5,
   f_bmstemperatures_b_polled_temp6,
@@ -371,7 +371,7 @@ messages[0x02181606] = {
 messages[0x13b76400] = {
   name = "Lock_6400",
   extended = true,
-  comment = "[confirmed] The lock (immobiliser) reporting its state. A single-byte message, and the only one on the bus with priority 0x13. Identified across two independent ... (dbc/signals.toml)",
+  comment = "[confirmed] The lock (immobiliser) reporting its state. A single-byte message, and the only one on the bus with priority 0x13. NOT PERIODIC. This carried ... (dbc/signals.toml)",
   signals = {
     {
       field = f_lock_6400_unlocked,
@@ -522,29 +522,29 @@ messages[0x05ff4605] = {
 }
 
 messages[0x05ff4606] = {
-  name = "BmsTemperatures_A",
+  name = "BmsCellTemperatures",
   extended = true,
-  comment = "[probable] BMS temperatures. Payload 1C1C1C reads as 28, 28, 28 which is a plausible cell temperature in degrees Celsius, and the same byte string is relayed in ... (dbc/signals.toml)",
+  comment = "[confirmed] BMS cell temperatures, three sensors. Was BmsTemperatures_A. Payload 1C1C1C reads as 28, 28, 28 degC, and the same byte string is relayed in ... (dbc/signals.toml)",
   signals = {
     {
-      field = f_bmstemperatures_a_temp1,
+      field = f_bmscelltemperatures_celltemp1,
       first = 0,
       count = 1,
-      suffix = " degC [probable]",
+      suffix = " degC",
       value = function(tvb) return be(tvb, 0, 8, false) end,
     },
     {
-      field = f_bmstemperatures_a_temp2,
+      field = f_bmscelltemperatures_celltemp2,
       first = 1,
       count = 1,
       suffix = " degC [probable]",
       value = function(tvb) return be(tvb, 8, 8, false) end,
     },
     {
-      field = f_bmstemperatures_a_temp3,
+      field = f_bmscelltemperatures_celltemp3,
       first = 2,
       count = 1,
-      suffix = " degC [probable]",
+      suffix = " degC",
       value = function(tvb) return be(tvb, 16, 8, false) end,
     },
   },
@@ -785,27 +785,27 @@ messages[0x05124605] = {
 messages[0x05124606] = {
   name = "BmsTemperatures_A_Polled",
   extended = true,
-  comment = "[probable] Reply to 02294606. As 05FF4606: 1E1E1D reads as 30, 30, 29 degC. Which sensor each byte is remains unassigned -- see 05FF4606 for why, and for the ... (dbc/signals.toml)",
+  comment = "[probable] Reply to 02294606. As 05FF4606: 1E1E1D reads as 30, 30, 29 degC -- the three cell temperature sensors. See 05FF4606.",
   signals = {
     {
-      field = f_bmstemperatures_a_polled_temp1,
+      field = f_bmstemperatures_a_polled_celltemp1,
       first = 0,
       count = 1,
-      suffix = " degC [probable]",
+      suffix = " degC",
       value = function(tvb) return be(tvb, 0, 8, false) end,
     },
     {
-      field = f_bmstemperatures_a_polled_temp2,
+      field = f_bmstemperatures_a_polled_celltemp2,
       first = 1,
       count = 1,
       suffix = " degC [probable]",
       value = function(tvb) return be(tvb, 8, 8, false) end,
     },
     {
-      field = f_bmstemperatures_a_polled_temp3,
+      field = f_bmstemperatures_a_polled_celltemp3,
       first = 2,
       count = 1,
-      suffix = " degC [probable]",
+      suffix = " degC",
       value = function(tvb) return be(tvb, 16, 8, false) end,
     },
   },
@@ -814,7 +814,7 @@ messages[0x05124606] = {
 messages[0x05124607] = {
   name = "BmsTemperatures_B_Polled",
   extended = true,
-  comment = "[probable] Reply to 02294607. As 05FF4607: 1E1D1D reads as 30, 29, 29 degC.",
+  comment = "[probable] Reply to 02294607. As 05FF4607: 1E1D1D reads as 30, 29, 29 degC -- the non-cell sensors, byte 0 probably the MOS. See 05FF4607.",
   signals = {
     {
       field = f_bmstemperatures_b_polled_temp4,
@@ -982,34 +982,34 @@ messages[0x05ff4600] = {
 messages[0x05124615] = {
   name = "BmsTempExtremes",
   extended = true,
-  comment = "[probable] Highest and lowest temperature with sensor indices, by exact analogy with 05124614's treatment of the cell voltages. Returned on request (02294615) ... (dbc/signals.toml)",
+  comment = "[confirmed] Highest and lowest temperature with sensor indices, by exact analogy with 05124614's treatment of the cell voltages. Returned on request (02294615) ... (dbc/signals.toml)",
   signals = {
     {
       field = f_bmstempextremes_maxtemp,
       first = 0,
       count = 1,
-      suffix = " degC [probable]",
+      suffix = " degC",
       value = function(tvb) return be(tvb, 0, 8, false) end,
     },
     {
       field = f_bmstempextremes_maxtempindex,
       first = 1,
       count = 1,
-      suffix = " [hypothesis]",
+      suffix = "",
       value = function(tvb) return be(tvb, 8, 8, false) end,
     },
     {
       field = f_bmstempextremes_mintemp,
       first = 2,
       count = 1,
-      suffix = " degC [probable]",
+      suffix = " degC",
       value = function(tvb) return be(tvb, 16, 8, false) end,
     },
     {
       field = f_bmstempextremes_mintempindex,
       first = 3,
       count = 1,
-      suffix = " [hypothesis]",
+      suffix = "",
       value = function(tvb) return be(tvb, 24, 8, false) end,
     },
   },
