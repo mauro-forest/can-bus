@@ -483,6 +483,42 @@ still disconnected from the earlier experiment and was never refitted. So this
 session's 121 identifiers are not a like-for-like inventory against sessions 1
 and 2, and any claim about `AA` = `60` or `64` from it carries that caveat.
 
+## Pedalling on the bench
+
+The 9 September stationary-pedalling session
+(`2026-09-09T16-10-23_unlock-pedal-stationary-lock`) is the first recording in
+which anything on the bike moved: four UNLOCK / pedal / LOCK loops, three
+brake presses, then three pack removals. GPS speed stayed 0.0 throughout.
+**Assumption, not confirmed at the time: the rear wheel was off the ground
+and spinning.** Every reading below depends on it.
+
+What moved, all of it at component 1 (`AA` = `16`):
+
+```
+03FF1603  bytes 0-1   0 -> 218..256 -> 0     ramps while pedalling; 0.1 km/h fits the 25 km/h limit
+03FF1602  bytes 4-5   0 -> 81 / 102          per-unlock counter, advances only while 1603 moves; metres fit
+03FF1602  bytes 1-2   133 -> 141 -> 151      cumulative, +1 per 10 of the above; odometer in 10 m fits
+03FF1604  byte 1      0 -> ~190, then holds   tracks the speed but keeps its last value until LOCK
+03FF1604  byte 3      0 -> 16 / 19            counts while pedalling, then holds
+05FF4610  current     -0.45 to -0.86 A        loop 2 only; the motor assisted in one loop of four
+```
+
+What did not move: `04FF3604`, the 30 ms message. Both channels held their
+idle 2-9 through every loop, which removes speed, cadence and torque as
+readings of it. Its one reaction was a sentinel: `0x0555` in one channel for
+about a second when the pedals stopped, twice, and once in the other channel
+mid-loop. Its `signals.toml` entry carries the detail.
+
+Nothing responded to the brakes. A search for bits set only within 6 s of the
+three brake marks, over all unlocked time, found none. The marks were typed
+after pressing, so this is a weak negative; a brake test wants a mark before
+the press and a hold of several seconds.
+
+The wider lesson is the one already on record for `02181606` byte 2, now
+repeated at `03FF1603`: a field nobody has exercised is indistinguishable from
+padding. Four sessions had read bytes 0-3 as one 32-bit value because bytes
+0-1 were always zero.
+
 ## Still unidentified
 
 | `AA BB` | Identifiers | What is known |
@@ -490,7 +526,7 @@ and 2, and any claim about `AA` = `60` or `64` from it carries that caveat.
 | `36 04` | `04FF3604` | 30 ms, the fastest message on the bus. **Still the most valuable unknown**, but no longer a mystery in shape: two 16-bit analogue channels idling at 4.47 and 3.05 with no correlation between them, plus the constant 200 and a flag. Not a lamp message. It needs a ride -- see `signals.toml`. |
 | `10 00`, `10 01` | `03FF1000`, `03FF1001` | The 105 ms heartbeat. Bytes 1-7 have never varied, across 83,259 frames and five sessions; bit `0x08` of byte 0 is clear for the first two seconds after a cold boot and set thereafter -- see `Heartbeat_1000.SystemReady`. `AA` = `10` fits no channel pattern, so it looks like a broadcast. |
 | `26 05` | `02FF2605` | 1 Hz. Bytes 0-4 are always `00 00 06 09 07`. Byte 7 is a rolling 0-9 sequence counter, one step per second. Bytes 5-6 change slowly and inconsistently -- byte 6 held for 47 s in one session and 20 s in another -- so they are not a tens digit and are not decoded. |
-| `16 03` | `03FF1603` | A value within 0.3 % of the pack voltage at 105 ms, quantised in ~16.6 mV steps, that changes only at component 1's power-up: it re-latched at three of the four pack restores and held through three IoT reboots. A coarse supply reading taken at boot. The offset to the BMS figure is 68-140 mV and not fixed. See `signals.toml`. |
+| `16 03` | `03FF1603` | **A correction: two fields, and bytes 0-1 are probably speed.** The "voltage-like" value described here before is bytes 2-3 only; bytes 0-1 had simply never been non-zero until the bike was pedalled. See "Pedalling on the bench" and `Speed_1603` in `signals.toml`. The bytes 2-3 reading is weaker than it was: 2.4-2.8 V above the pack in the pedalling session. |
 | `46 16`, `46 18` | `05124616`, `05124618` | BMS parameters. `4616` is a constant 12486. `4618` falls across sessions (3861, 3603-3719, 3540) but not monotonically within one. Undecoded. |
 | `86 xx`, `B6 06`, `27 04`, `40 xx`, `A6 04` | `02488600`, `0260B606`, `02FF2704`, `05FF4000`, `0258A604` | Constant payloads, mostly zero. A constant carries no information, so there is nothing to fit until something moves them. `0258A604` appeared only in the reboot session, 15 all-zero frames inside the reboot wakes. |
 | `B0 28` | `1FF8B028` | **A correction: not a constant.** It was listed with the constants because its payload is always zero. It is an event: exactly one frame per lock-state transition in all eleven sessions, 2.3-3.4 s after each UNLOCK and 0.4-0.9 s after each LOCK, within 0.1 s of the first `13B76400` frame either way. It also fired in the three sessions with the HubLock removed, so the HubLock does not send it; and about 24 s after each IoT REBOOT and around each `MEULK`. The information is in its timing, not its payload. See `LockTransition_B028` in `signals.toml`. |

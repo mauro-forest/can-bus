@@ -222,10 +222,16 @@ local f_unknown_3604_analoguea = ProtoField.uint32("ebike.unknown_3604.analoguea
 local f_unknown_3604_analogueb = ProtoField.uint32("ebike.unknown_3604.analogueb", "AnalogueB", base.DEC)
 -- Unknown_3604.Constant200: Bytes 4-5. Holds 200 (0xC8) in all but the first second after a wake, where it is 0, and in a 90
 local f_unknown_3604_constant200 = ProtoField.uint32("ebike.unknown_3604.constant200", "Constant200", base.DEC)
--- Unknown_1603.VoltageLike: Bytes 0-3 big-endian. Seven distinct values across seven sessions, all within 0.3 % of the pack 
-local f_unknown_1603_voltagelike = ProtoField.uint32("ebike.unknown_1603.voltagelike", "VoltageLike", base.DEC)
+-- Speed_1603.Speed: Bytes 0-1 big-endian. Zero whenever the bike is not being pedalled: every frame of every session
+local f_speed_1603_speed = ProtoField.double("ebike.speed_1603.speed", "Speed")
+-- Speed_1603.VoltageLike: Bytes 2-3 big-endian (CORRECTION: previously bytes 0-3; see the message comment). Everything rec
+local f_speed_1603_voltagelike = ProtoField.uint32("ebike.speed_1603.voltagelike", "VoltageLike", base.DEC)
 -- Heartbeat_1000.SystemReady: Bit 0x08 of byte 0. Clear for the first seconds after the pack is connected, then set, and it ne
 local f_heartbeat_1000_systemready = ProtoField.uint32("ebike.heartbeat_1000.systemready", "SystemReady", base.DEC)
+-- Distance_1602.TripDistance: Bytes 4-5 big-endian. 0 at each UNLOCK, counts up only while Speed is non-zero, holds when it re
+local f_distance_1602_tripdistance = ProtoField.uint32("ebike.distance_1602.tripdistance", "TripDistance", base.DEC)
+-- Distance_1602.Odometer: Bytes 1-2 big-endian, read as 10 m units. Byte 2 went 133 -> 141 -> 151 across loops 1 and 2 (+8
+local f_distance_1602_odometer = ProtoField.uint32("ebike.distance_1602.odometer", "Odometer", base.DEC)
 
 ebike.fields = {
   f_message,
@@ -311,8 +317,11 @@ ebike.fields = {
   f_unknown_3604_analoguea,
   f_unknown_3604_analogueb,
   f_unknown_3604_constant200,
-  f_unknown_1603_voltagelike,
+  f_speed_1603_speed,
+  f_speed_1603_voltagelike,
   f_heartbeat_1000_systemready,
+  f_distance_1602_tripdistance,
+  f_distance_1602_odometer,
 }
 
 local messages = {}
@@ -1223,16 +1232,23 @@ messages[0x04ff3604] = {
 }
 
 messages[0x03ff1603] = {
-  name = "Unknown_1603",
+  name = "Speed_1603",
   extended = true,
-  comment = "[hypothesis] 105 ms, and constant for a whole session, which is a strange pair. Bytes 0-3 big-endian read as a value very close to the pack voltage: session 1 ... (dbc/signals.toml)",
+  comment = "[probable] Component 1's 105 ms status frame. Two fields, not one. CORRECTION -- this was recorded as one 32-bit big-endian value in bytes 0-3, a \"voltage-like\" ... (dbc/signals.toml)",
   signals = {
     {
-      field = f_unknown_1603_voltagelike,
+      field = f_speed_1603_speed,
       first = 0,
-      count = 4,
+      count = 2,
+      suffix = " km/h [probable]",
+      value = function(tvb) return be(tvb, 0, 16, false) * 0.1 end,
+    },
+    {
+      field = f_speed_1603_voltagelike,
+      first = 2,
+      count = 2,
       suffix = " mV [hypothesis]",
-      value = function(tvb) return be(tvb, 0, 32, false) end,
+      value = function(tvb) return be(tvb, 16, 16, false) end,
     },
   },
 }
@@ -1256,6 +1272,35 @@ messages[0x1ff8b028] = {
   name = "LockTransition_B028",
   extended = true,
   comment = "[probable] One all-zero frame per lock-state transition. Listed in nodes.md as a constant until the 9 September unlock/lock session; the payload IS constant ... (dbc/signals.toml)",
+  signals = {},
+}
+
+messages[0x03ff1602] = {
+  name = "Distance_1602",
+  extended = true,
+  comment = "[hypothesis] Component 1, 1 Hz while awake. Two counters that only advance while 03FF1603.Speed is non-zero, seen in the 9 September stationary-pedalling session ... (dbc/signals.toml)",
+  signals = {
+    {
+      field = f_distance_1602_tripdistance,
+      first = 4,
+      count = 2,
+      suffix = " m [hypothesis]",
+      value = function(tvb) return be(tvb, 32, 16, false) end,
+    },
+    {
+      field = f_distance_1602_odometer,
+      first = 1,
+      count = 2,
+      suffix = " m [hypothesis]",
+      value = function(tvb) return be(tvb, 8, 16, false) * 10 end,
+    },
+  },
+}
+
+messages[0x03ff1604] = {
+  name = "Unknown_1604",
+  extended = true,
+  comment = "[hypothesis] Component 1, 1 Hz while awake. Two bytes move only while 03FF1603.Speed is non-zero (9 September stationary-pedalling session); neither is decoded ... (dbc/signals.toml)",
   signals = {},
 }
 

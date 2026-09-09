@@ -202,13 +202,20 @@ BO_ 2231318020 Unknown_3604: 8 Vector__XXX
  SG_ AnalogueB : 23|16@0+ (1,0) [0|0] "" Vector__XXX
  SG_ AnalogueA : 7|16@0+ (1,0) [0|0] "" Vector__XXX
 
-BO_ 2214532611 Unknown_1603: 8 Vector__XXX
- SG_ VoltageLike : 7|32@0+ (1,0) [0|0] "mV" Vector__XXX
+BO_ 2214532611 Speed_1603: 8 Vector__XXX
+ SG_ VoltageLike : 23|16@0+ (1,0) [0|0] "mV" Vector__XXX
+ SG_ Speed : 7|16@0+ (0.1,0) [0|0] "km/h" Vector__XXX
 
 BO_ 2214531072 Heartbeat_1000: 8 Vector__XXX
  SG_ SystemReady : 3|1@0+ (1,0) [0|0] "" Vector__XXX
 
 BO_ 2683875368 LockTransition_B028: 8 Vector__XXX
+
+BO_ 2214532610 Distance_1602: 8 Vector__XXX
+ SG_ TripDistance : 39|16@0+ (1,0) [0|0] "m" Vector__XXX
+ SG_ Odometer : 15|16@0+ (10,0) [0|0] "m" Vector__XXX
+
+BO_ 2214532612 Unknown_1604: 8 Vector__XXX
 
 
 
@@ -1154,7 +1161,20 @@ all seven sessions (9,891 frames): byte 1 mean 4.46-4.53, byte 3 mean
 It is specifically an UNLOCK detector, not a bus-activity detector. The bus can
 be woken without an unlock -- an IoT REBOOT does it, and so does a pack
 restore -- and this message does not appear in either case while ~65 others
-do. See nodes.md, \"An IoT reboot wakes the bus\".";
+do. See nodes.md, \"An IoT reboot wakes the bus\".
+
+UPDATE, 9 September stationary-pedalling session: NOT speed, NOT cadence, NOT
+torque. Through four loops of pedalling with 03FF1603 bytes 0-1 ramping to
+~25 km/h and the motor drawing up to 0.86 A, both channels sat at their idle
+2-9 exactly as on a stationary bike. What did happen: AnalogueA read exactly
+0x0555 (1365) for 1.4 s and 0.8 s at the instant pedalling stopped in loops 1
+and 2, with byte 6 = 1 throughout the run, and AnalogueB read 0x0555 for
+1.9 s in the middle of loop 2. 1365 is one third of a 12-bit full scale and
+never appears as any other value, so it is a sentinel, not a measurement.
+Item 1 of the list above is done and did not settle it; item 2 -- throttle
+and brakes -- is now the test. Three brake presses in this session showed no
+byte or bit changing only around them, but the marks were typed after the
+fact, so that is a weak negative.";
 CM_ SG_ 2231318020 Constant200 "[hypothesis] Bytes 4-5. Holds 200 (0xC8) in all but the first second after a wake, where it
 is 0, and in a 90 ms blip during a re-unlock. Named for what it is rather than
 what it might mean. A limit, a scale or a commanded setpoint would all look
@@ -1166,48 +1186,54 @@ CM_ SG_ 2231318020 AnalogueA "[hypothesis] Bytes 0-1. Byte 0 has been zero in al
 guess; 16 bits is written because bytes 2-3 clearly pair the same way.
 Stationary value 1 to 9, mean 4.47, resampling every 30 ms. Unnamed on purpose:
 calling it Torque or Throttle would record a guess as a fact.";
-CM_ BO_ 2214532611 "[hypothesis] 105 ms, and constant for a whole session, which is a strange pair. Bytes 0-3
-big-endian read as a value very close to the pack voltage:
+CM_ BO_ 2214532611 "[probable] Component 1's 105 ms status frame. Two fields, not one.
 
-  session 1   0x0000D11F = 53535       pack was 53620-53631 mV
-  session 2   0x0000D10E = 53518       pack was 53580-53592 mV
-  session 3   0x0000D0DC = 53468       pack was 53562-53576 mV
+CORRECTION -- this was recorded as one 32-bit big-endian value in bytes 0-3, a
+\"voltage-like\" reading latched at power-up. That layout was an artefact of the
+bench: bytes 0-1 had been zero in every frame ever recorded because the bike
+had never moved. In the 9 September stationary-pedalling session
+(2026-09-09T16-10-23) bytes 0-1 rose from 0 to 244, 256, 218 and 230 in the
+four unlocked loops and returned to 0 within two seconds of the pedals
+stopping, while bytes 2-3 kept holding a number near 0xD9xx. So bytes 0-1 are
+a live value and bytes 2-3 are the field the old note described. The old
+argument that 0x0000D11F \"is within 0.3 % of the pack voltage\" was about bytes
+2-3 all along and is kept below, weakened.
 
-It falls between sessions in the same order as the pack does, and sits 90 to
-110 mV below it. But 05FF4610's pack voltage moves by about 12 mV within a
-session while this does not move at all, so it cannot be a live measurement of
-the same thing. A value latched when the bus wakes would look exactly like
-this.
+The same trap as 02181606 byte 2 (max speed read as brightness): a field that
+nobody has exercised looks exactly like a constant, or like padding.";
+CM_ SG_ 2214532611 VoltageLike "[hypothesis] Bytes 2-3 big-endian (CORRECTION: previously bytes 0-3; see the message
+comment). Everything recorded about the 32-bit value applies to this field
+unchanged: seven distinct values across the 7 September sessions, all within
+0.3 % of the pack voltage at the time, quantised in ~16.6 mV steps; re-latched
+at component 1's power-up (pack restores), not at wake.
 
-Worth having because of where it is: AA=16 is the address that carries the
-rear light bit, and a component that reports a pack voltage is not a rear
-lamp. That is part of the argument in nodes.md that AA names a controller
-rather than a light.
+WEAKENED on 9 September. In the pedalling session it took 14 distinct values
+(0xD78A to 0xD94A, 55178-55626) while the BMS reported 52.8 V, i.e. 2.4-2.8 V
+ABOVE the pack rather than 0.1 V below it, and it moved during pedalling. The
+\"coarse supply reading\" story does not survive that offset unchanged. Kept as
+mV so the comparison stays easy to run; do not rely on it.";
+CM_ SG_ 2214532611 Speed "[probable] Bytes 0-1 big-endian. Zero whenever the bike is not being pedalled: every
+frame of every session before 9 September, and every non-pedalling second of
+the pedalling session. Non-zero only while the pedals turned.
 
-WHAT WOULD DISPROVE \"latched at wake\": unlock, wait for the value, then load
-the pack hard enough to move 05FF4610 by more than 100 mV, and see whether
-this follows. If it does, it is a filtered live reading and the constancy was
-only a symptom of a very quiet bench.
+Read as 0.1 km/h because of where it tops out. Peaks in the four loops were
+244, 256, 218 and 230 -- 21.8 to 25.6 km/h, straddling the 25 km/h limit the
+bike is configured to (03FF1600 / 02181606 byte 2), which is where a pedelec
+controller stops assisting. The value ramps up over 5-8 s and decays over
+about 2 s, and does not oscillate stroke by stroke as a torque reading would
+at this sample rate.
 
-UPDATE from four more sessions. Not constant per session after all: in the
-battery-removal session it re-latched at pack restores 1, 3 and 4 (53369 ->
-53352 -> 53335) and did not change at the UNLOCK, then held 53335 through the
-reboot session's three IoT reboots. So it latches on component 1's power-up,
-not on wake -- consistent with AA=14's awake counter also resetting on pack
-power. Two more things the wider corpus shows:
+ASSUMPTION: the rear wheel was off the ground (or on a stand) and spinning
+while the rider pedalled; a stationary bike produces no speed otherwise. This
+was not confirmed at the time of recording. Motor current (05FF4610) rose to
+0.45-0.86 A only in loop 2, so the motor assisted in one loop of four.
 
-  * The values are quantised. All seven distinct values on record differ by
-    multiples of about 16.6 mV (diffs 33, 17, 17, 99, 50, 17), which is an
-    ADC step, so this is component 1's own measurement of its supply and not
-    a relay of the BMS figure.
-  * The offset to the BMS pack voltage is not fixed: 68 to 140 mV across the
-    seven sessions, and the unlock/lock session's value (53352) is ABOVE the
-    reboot session's (53335) while the pack fell 45 mV between them. So \"pack
-    voltage minus a constant\" does not describe it; \"a coarse supply reading
-    taken at power-up\" does.";
-CM_ SG_ 2214532611 VoltageLike "[hypothesis] Bytes 0-3 big-endian. Seven distinct values across seven sessions, all within 0.3 % of the
-pack voltage at the time, quantised in ~16.6 mV steps. The unit is written as
-mV to make the comparison easy to run; it is a hypothesis, not a measurement.";
+WHAT WOULD CONFIRM IT: ride at a steady GPS speed and compare with GTFRI's
+speed field, which stayed 0.0 throughout this stationary session. WHAT WOULD
+DISPROVE IT: a ride where this reads 0, or where it tracks effort rather than
+GPS speed. If the wheel turns out not to have been spinning, this is not
+speed; cadence x 10 or a filtered torque would be the next candidates, though
+244 rpm is not a cadence a rider produces.";
 CM_ BO_ 2214531072 "[probable] A heartbeat. Every 105 ms, payload 0840112200000001. It runs while the bus
 sleeps, so it is one of the five identifiers a locked bike still sends. Node
 field 10->00 appears nowhere else.
@@ -1263,6 +1289,38 @@ few seconds, or a 1FF8B028 with no transition. The REBOOT and MEULK
 occurrences are the ones to look at: if the lock state can be shown not to
 change there, this is not a lock-transition marker but something broader,
 such as \"component 3 changed state\".";
+CM_ BO_ 2214532610 "[hypothesis] Component 1, 1 Hz while awake. Two counters that only advance while
+03FF1603.Speed is non-zero, seen in the 9 September stationary-pedalling
+session. Neither has been checked against a measured distance, hence
+\"hypothesis\" for both. Payload example while pedalling: 07 5A 86 00 00 12 13 24.";
+CM_ SG_ 2214532610 TripDistance "[hypothesis] Bytes 4-5 big-endian. 0 at each UNLOCK, counts up only while Speed is
+non-zero, holds when it returns to 0, and resets to 0 at the next UNLOCK.
+Reached 81 in loop 1 and 102 in loop 2. Integrating the Speed signal over
+those loops gives roughly 90 m and 110 m, so metres fit within the accuracy of
+the integration. WHAT WOULD CONFIRM IT: ride a measured 100 m from an unlock
+and read this. WHAT WOULD DISPROVE IT: any ride where it disagrees with the
+distance by more than the speed integration does.";
+CM_ SG_ 2214532610 Odometer "[hypothesis] Bytes 1-2 big-endian, read as 10 m units. Byte 2 went 133 -> 141 -> 151 across
+loops 1 and 2 (+8, +10) while TripDistance reached 81 and 102: one step per
+ten metres of trip, and it does not reset at UNLOCK. 0x5A86 = 23174 -> 231.7
+km, a plausible total for a shared bike. Only byte 2 has been seen to move;
+byte 1 (0x5A) is the width guess. WHAT WOULD DISPROVE IT: a ride where it
+advances by other than TripDistance / 10, or a pack removal resetting it (an
+odometer must not).";
+CM_ BO_ 2214532612 "[hypothesis] Component 1, 1 Hz while awake. Two bytes move only while 03FF1603.Speed is
+non-zero (9 September stationary-pedalling session); neither is decoded.
+Payload example while pedalling: 00 81 00 05 00 00 00 00.
+
+  byte 1  rises with Speed to 172-225 and then HOLDS its last value after the
+          pedals stop (182 after loop 1, 193 after loop 2) until the LOCK.
+          A held peak or a slowly filtered speed; not the live speed, which
+          drops to 0.
+  byte 3  counts 0 -> 16 in loop 1 and 0 -> 19 in loop 2, one step every
+          second or so while pedalling, then holds. Seconds of assistance, or
+          a coarser distance, would both look like this.
+
+Recorded so that the next ride has something to check against. No signals
+declared: naming either byte would record a guess as a fact.";
 BA_DEF_ BO_  "GenMsgCycleTime" INT 0 65535;
 BA_DEF_DEF_  "GenMsgCycleTime" 0;
 BA_ "GenMsgCycleTime" BO_ 2214532608 1000;
@@ -1283,6 +1341,8 @@ BA_ "GenMsgCycleTime" BO_ 2197759490 10000;
 BA_ "GenMsgCycleTime" BO_ 2231318020 30;
 BA_ "GenMsgCycleTime" BO_ 2214532611 105;
 BA_ "GenMsgCycleTime" BO_ 2214531072 105;
+BA_ "GenMsgCycleTime" BO_ 2214532610 1000;
+BA_ "GenMsgCycleTime" BO_ 2214532612 1000;
 
 
 
